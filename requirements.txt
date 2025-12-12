@@ -30,6 +30,13 @@ python-dateutil>=2.9.0.post0
 urllib3>=2.5.0
 six>=1.17.0
 
+# Google Cloud Dialogflow CX
+google-cloud-dialogflow-cx>=1.33.0
+google-api-core>=2.19.0
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0  # For OAuth 2.0 authentication
+googleapis-common-protos>=1.63.0
+
 # Development and testing tools
 pytest>=8.4.1
 pytest-asyncio>=1.1.0

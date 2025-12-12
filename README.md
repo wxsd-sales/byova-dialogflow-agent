@@ -2,359 +2,444 @@
 
 [![License: Cisco Sample Code](https://img.shields.io/badge/License-Cisco%20Sample%20Code-blue.svg)](LICENSE)
 
-A Python-based gateway for Webex Contact Center (WxCC) that provides virtual agent integration capabilities. This gateway acts as a bridge between WxCC and various virtual agent providers, enabling seamless voice interactions.
-
-## 📚 Documentation
-
-**Complete Setup Guide**: [BYOVA with AWS Lex Setup Guide](docs/guides/byova-aws-lex-setup.md)
-
-This comprehensive guide walks you through:
-- Setting up a Webex Contact Center sandbox
-- Configuring BYOVA and BYODS
-- Creating AWS Lex bots
-- Deploying and testing the gateway
+A Python-based gateway for Webex Contact Center (WxCC) that provides virtual agent integration with Google Dialogflow CX and other platforms. This gateway acts as a bridge between WxCC and virtual agent providers, enabling seamless voice interactions.
 
 ## Table of Contents
 
-- [Install](#install)
-- [Usage](#usage)
-- [API](#api)
-- [Maintainers](#maintainers)
-- [Contributing](#contributing)
-- [License](#license)
-
-## Install
-
-### Prerequisites
-
-- Python 3.8 or higher
-- macOS, Linux, or Windows
-- Webex Contact Center environment for testing
-
-### Setup
-
-1. **Clone the Repository**
-   ```bash
-   git clone https://github.com/webex/webex-byova-gateway-python.git
-   cd webex-byova-gateway-python
-   ```
-
-2. **Create and Activate Virtual Environment**
-   ```bash
-   # Create virtual environment
-   python -m venv venv
-
-   # Activate virtual environment (REQUIRED before running any commands)
-   # On macOS/Linux:
-   source venv/bin/activate
-   # On Windows:
-   # venv\Scripts\activate
-   
-   # Verify activation - you should see (venv) in your prompt
-   which python  # Should show path to venv/bin/python
-   ```
-
-3. **Install Dependencies**
-   ```bash
-   pip install -r requirements.txt
-   ```
-
-4. **Generate gRPC Stubs**
-   ```bash
-   # Generate Python gRPC client and server stubs in the generated directory
-   python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
-   ```
-   
-   Generated protobuf files are stored in the `src/generated` directory to separate auto-generated code from hand-written code.
-   
-   **Important**: The generated protobuf files (`*_pb2.py` and `*_pb2_grpc.py`) are **NOT committed to the repository**. They must be generated locally after cloning the repository. The `__init__.py` file in the generated directory is committed to maintain the package structure.
-   
-   **Note**: The generated files are automatically imported by the gateway. No manual import is required for normal operation.
-
-5. **Prepare Audio Files**
-   
-   Place your audio files in the `audio/` directory. The default configuration expects:
-   - `welcome.wav` - Welcome message
-   - `default_response.wav` - Response messages
-   - `goodbye.wav` - Goodbye message
-   - `transferring.wav` - Transfer message
-   - `error.wav` - Error message
+- [Quick Start](#quick-start)
+- [Google Dialogflow CX Setup](#google-dialogflow-cx-setup)
+  - [Prerequisites](#prerequisites)
+  - [Authentication Options](#authentication-options)
+  - [Option 1: OAuth 2.0 Setup](#option-1-oauth-20-setup)
+  - [Option 2: Application Default Credentials (ADC)](#option-2-application-default-credentials-adc)
+- [Running the Gateway](#running-the-gateway)
+- [Monitoring](#monitoring)
+- [Additional Documentation](#additional-documentation)
 
 ## Quick Start
 
-For a quick test of the gateway:
+### 1. Clone and Setup
 
-1. **Activate virtual environment** (if not already active):
-   ```bash
-   source venv/bin/activate
+```bash
+# Clone the repository
+git clone https://github.com/webex/webex-byova-gateway-python.git
+cd webex-byova-gateway-python
+
+# Create virtual environment
+python -m venv venv
+
+# Activate virtual environment
+# Windows:
+venv\Scripts\Activate.ps1
+# macOS/Linux:
+source venv/bin/activate
+
+# Install dependencies
+pip install -r requirements.txt
+
+# Generate gRPC stubs
+python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
+```
+
+### 2. Configure Authentication
+
+Choose one of two authentication methods:
+
+- **OAuth 2.0** - Best for development and testing
+- **Application Default Credentials (ADC)** - Best for production
+
+See [Authentication Options](#authentication-options) below.
+
+### 3. Start the Gateway
+
+```bash
+# Make sure virtual environment is activated
+python main.py
+```
+
+Access the monitoring interface at: http://localhost:8080
+
+---
+
+## Google Dialogflow CX Setup
+
+### Prerequisites
+
+Before connecting to Google Dialogflow CX, you need:
+
+1. **Google Cloud Account** with billing enabled
+2. **Dialogflow CX Agent** created and configured
+3. **Python 3.8+** installed
+4. **Webex Contact Center** environment for testing
+
+### Enable Dialogflow API
+
+```bash
+# Using gcloud CLI
+gcloud services enable dialogflow.googleapis.com
+
+# Or enable in Google Cloud Console:
+# https://console.cloud.google.com/apis/library/dialogflow.googleapis.com
+```
+
+### Get Your Project Information
+
+You'll need these from Google Cloud Console:
+
+- **Project ID**: Your Google Cloud project ID
+- **Agent ID**: Your Dialogflow CX agent ID (found in agent settings)
+- **Location**: Where your agent is hosted (e.g., `global`, `us-central1`)
+
+---
+
+## Authentication Options
+
+The gateway supports two authentication methods for Google Dialogflow CX:
+
+| Method        | Best For                 | Setup Time | Complexity |
+| ------------- | ------------------------ | ---------- | ---------- |
+| **OAuth 2.0** | Development, Testing     | 5 minutes  | Medium     |
+| **ADC**       | Production, Simple Setup | 2 minutes  | Low        |
+
+---
+
+## Option 1: OAuth 2.0 Setup
+
+OAuth 2.0 provides user-based authentication. Best for development when you want to test with your own Google account.
+
+### Step 1: Create OAuth 2.0 Credentials
+
+1. Go to [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials)
+2. Click **+ CREATE CREDENTIALS** > **OAuth client ID**
+3. Choose **Application type**: `Desktop app`
+4. Enter a name (e.g., "BYOVA Gateway")
+5. Click **CREATE**
+6. **Copy** the Client ID and Client Secret
+
+### Step 2: Add Redirect URI
+
+1. Click the **edit icon** (pencil) next to your OAuth client
+2. In **Authorized redirect URIs**, add:
    ```
-
-2. **Generate gRPC stubs** (if not already done):
-   ```bash
-   python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
+   http://localhost:8090/
    ```
+3. Click **SAVE**
+4. **Wait 5 minutes** for changes to propagate
 
-3. **Start the server**:
-   ```bash
-   python main.py
-   ```
+### Step 3: Configure Gateway
 
-4. **Access the monitoring interface**:
-   - Open http://localhost:8080 in your browser
-   - Check the status at http://localhost:8080/api/status
+Edit `config/config.yaml`:
 
-The gateway will start with the local audio connector by default, which uses the audio files in the `audio/` directory.
+```yaml
+connectors:
+  dialogflow_cx_connector:
+    type: "dialogflow_cx_connector"
+    class: "DialogflowCXConnector"
+    module: "connectors.dialogflow_cx_connector"
+    config:
+      # Your Dialogflow CX details
+      project_id: "your-project-id"
+      agent_id: "your-agent-id"
+      location: "global"
 
-## Usage
+      # OAuth 2.0 credentials
+      oauth_client_id: "YOUR_CLIENT_ID.apps.googleusercontent.com"
+      oauth_client_secret: "YOUR_CLIENT_SECRET"
+      oauth_token_file: "oauth_token.pickle"
 
-### Configuration
+      # Audio settings
+      language_code: "en-US"
+      sample_rate_hertz: 16000
+      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
+      force_input_format: "wxcc"
 
-The gateway is configured via `config/config.yaml`. Key configuration options:
+      agents:
+        - "Dialogflow CX Agent"
+```
+
+### Step 4: Grant User Permissions
+
+```bash
+# Grant Dialogflow permissions to your Google account
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="user:your-email@gmail.com" \
+    --role="roles/dialogflow.client"
+```
+
+### Step 5: Start Gateway (First Time)
+
+```bash
+# Activate virtual environment
+venv\Scripts\Activate.ps1  # Windows
+# source venv/bin/activate  # macOS/Linux
+
+# Start gateway
+python main.py
+```
+
+**What happens:**
+
+1. Browser opens automatically
+2. Sign in with your Google account
+3. Click **Allow** to grant permissions
+4. Token is saved to `oauth_token.pickle`
+5. Gateway starts successfully
+
+**Subsequent runs:** Just run `python main.py` - no browser needed!
+
+---
+
+## Option 2: Application Default Credentials (ADC)
+
+ADC is the simplest method. Best for production and when you want a one-time setup.
+
+### Step 1: Authenticate with Google
+
+```powershell
+# Authenticate with your Google account
+gcloud auth application-default login
+```
+
+This will:
+
+1. Open your browser
+2. Sign in with Google
+3. Save credentials automatically
+4. Work for all Google Cloud APIs
+
+### Step 2: Grant User Permissions
+
+```bash
+# Grant Dialogflow permissions to your account
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="user:your-email@gmail.com" \
+    --role="roles/dialogflow.client"
+```
+
+### Step 3: Configure Gateway
+
+Edit `config/config.yaml`:
+
+```yaml
+connectors:
+  dialogflow_cx_connector:
+    type: "dialogflow_cx_connector"
+    class: "DialogflowCXConnector"
+    module: "connectors.dialogflow_cx_connector"
+    config:
+      # Your Dialogflow CX details
+      project_id: "your-project-id"
+      agent_id: "your-agent-id"
+      location: "global"
+
+      # No oauth_client_id or oauth_client_secret = uses ADC automatically
+
+      # Audio settings
+      language_code: "en-US"
+      sample_rate_hertz: 16000
+      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
+      force_input_format: "wxcc"
+
+      agents:
+        - "Dialogflow CX Agent"
+```
+
+### Step 4: Start Gateway
+
+```bash
+# Activate virtual environment
+venv\Scripts\Activate.ps1  # Windows
+# source venv/bin/activate  # macOS/Linux
+
+# Start gateway
+python main.py
+```
+
+That's it! ADC is automatically used.
+
+---
+
+## Running the Gateway
+
+### Start the Server
+
+```bash
+# 1. Activate virtual environment (REQUIRED)
+venv\Scripts\Activate.ps1  # Windows
+# source venv/bin/activate  # macOS/Linux
+
+# 2. Start the gateway
+python main.py
+```
+
+### Verify It's Running
+
+Look for these messages:
+
+```
+INFO - DialogflowCXConnector initialized for agent: projects/your-project/locations/global/agents/your-agent
+INFO - Dialogflow CX SessionsClient initialized successfully
+INFO - Server started on port 50051
+INFO - Monitoring interface available at http://0.0.0.0:8080
+```
+
+### Stop the Server
+
+Press `Ctrl+C` in the terminal
+
+---
+
+## Monitoring
+
+### Web Interface
+
+Once running, access the monitoring dashboard:
+
+- **Main Dashboard**: http://localhost:8080
+- **Status API**: http://localhost:8080/api/status
+- **Health Check**: http://localhost:8080/health
+
+### Dashboard Features
+
+- **Real-time Status**: Gateway and connector status
+- **Active Connections**: Live session tracking
+- **Available Agents**: Configured Dialogflow CX agents
+- **Configuration**: View current settings
+
+---
+
+## Configuration Reference
+
+### Complete Configuration Example
 
 ```yaml
 # Gateway settings
 gateway:
-   host: "0.0.0.0"
-   port: 50051
+  host: "0.0.0.0"
+  port: 50051
 
 # Monitoring interface
 monitoring:
-   enabled: true
-   host: "0.0.0.0"
-   port: 8080
+  enabled: true
+  host: "0.0.0.0"
+  port: 8080
 
 # Connectors
 connectors:
-   local_audio_connector:
-      type: "local_audio_connector"
-      class: "LocalAudioConnector"
-      module: "connectors.local_audio_connector"
-      config:
-         audio_files:
-            welcome: "welcome.wav"
-            transfer: "transferring.wav"
-            goodbye: "goodbye.wav"
-            error: "error.wav"
-            default: "default_response.wav"
-         agents:
-            - "Local Playback"
+  dialogflow_cx_connector:
+    type: "dialogflow_cx_connector"
+    class: "DialogflowCXConnector"
+    module: "connectors.dialogflow_cx_connector"
+    config:
+      # Required: Google Cloud project ID
+      project_id: "your-project-id"
 
-   # Example: AWS Lex Connector for Dev Environment with Explicit Credentials
-   aws_lex_connector_dev:
-      type: "aws_lex_connector"
-      class: "AWSLexConnector"
-      module: "connectors.aws_lex_connector"
-      config:
-         region_name: "us-east-1"  # Set your AWS region
-         bot_alias_id: "TSTALIASID"  # Set your Lex bot alias
-         aws_access_key_id: "YOUR_DEV_ACCESS_KEY"  # Explicit AWS access key
-         aws_secret_access_key: "YOUR_DEV_SECRET_KEY"  # Explicit AWS secret
-         barge_in_enabled: false
-         audio_logging:
-            enabled: true
-            output_dir: "logs/audio_recordings"
-            filename_format: "{conversation_id}_{timestamp}_{source}.wav"
-            log_all_audio: true
-            max_file_size: 10485760
-            sample_rate: 8000
-            bit_depth: 8
-            channels: 1
-            encoding: "ulaw"
-         agents: []
+      # Required: Dialogflow CX agent ID
+      agent_id: "your-agent-id"
+
+      # Required: Agent location
+      location: "global"
+
+      # Optional: OAuth 2.0 credentials (if using OAuth)
+      # oauth_client_id: "YOUR_CLIENT_ID.apps.googleusercontent.com"
+      # oauth_client_secret: "YOUR_CLIENT_SECRET"
+      # oauth_token_file: "oauth_token.pickle"
+
+      # Audio settings for WxCC
+      language_code: "en-US"
+      sample_rate_hertz: 16000
+      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
+      force_input_format: "wxcc"
+      min_audio_seconds: 2.5
+      max_audio_seconds: 5.0
+
+      # Agent names exposed to WxCC
+      agents:
+        - "Dialogflow CX Agent"
+
+# Logging
+logging:
+  gateway:
+    level: "INFO"
+    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+    file: "logs/gateway.log"
 ```
 
+---
 
-**Note:** For security, prefer using environment variables for credentials in production. Explicit credentials in config files are for development/testing only.
+## Troubleshooting
 
-### Setting AWS Credentials with Environment Variables
+### OAuth Errors
 
-For production or secure development, set your AWS credentials as environment variables instead of hardcoding them in your config file:
+**Error: "redirect_uri_mismatch"**
 
-```sh
-export AWS_ACCESS_KEY_ID=your_access_key
-export AWS_SECRET_ACCESS_KEY=your_secret_key
-```
+- Add `http://localhost:8090/` to OAuth redirect URIs in Google Cloud Console
+- Include the trailing slash `/`
+- Wait 5 minutes after saving
 
-You can add these lines to your shell profile (e.g., `.bashrc`, `.zshrc`) or set them in your deployment environment. The gateway will automatically use these credentials if they are set.
+**Error: "invalid_client"**
 
-### Running the Server
+- Verify Client ID and Client Secret are correct
+- Check for extra spaces or line breaks in config.yaml
 
-#### Method 1: Manual Start (Recommended for Development)
+### ADC Errors
+
+**Error: "Could not automatically determine credentials"**
 
 ```bash
-# Ensure virtual environment is activated
-source venv/bin/activate
-
-# Start the server
-python main.py
+# Re-authenticate
+gcloud auth application-default login
 ```
 
-The server will start both:
-- **gRPC Server**: `grpc://0.0.0.0:50051`
-- **Web Monitoring Interface**: `http://localhost:8080`
-
-#### Method 2: Background Start
+**Error: "Permission denied"**
 
 ```bash
-# Start in background
-python main.py &
-
-# Check if running
-ps aux | grep "python main.py"
-
-# Stop the server
-pkill -f "python main.py"
+# Grant Dialogflow permissions
+gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
+    --member="user:your-email@gmail.com" \
+    --role="roles/dialogflow.client"
 ```
 
-### Public URL Hosting with ngrok
+### Port Already in Use
 
-The [Bring Your Own Data Source (BYODS) framework](https://developer.webex.com/create/docs/bring-your-own-datasource) requires a publicly accessible URL for data exchange with Webex Contact Center. For development and testing, you can use ngrok to create a public URL that tunnels to your local gateway.
+```powershell
+# Windows - Find and kill process on port 50051
+netstat -ano | findstr :50051
+taskkill /PID <PID_NUMBER> /F
 
-#### Prerequisites
+# Or change port in config/config.yaml
+```
 
-1. **Install ngrok**
-   - Download from [ngrok.com](https://ngrok.com/download)
-   - Or install via package manager:
-     ```bash
-     # macOS with Homebrew
-     brew install ngrok/ngrok/ngrok
-     
-     # Or download directly from ngrok.com
-     ```
-
-2. **Sign up for ngrok account** (free tier available)
-   - Create account at [ngrok.com](https://ngrok.com)
-   - Get your authtoken from the dashboard
-
-3. **Configure ngrok**
-   ```bash
-   # Add your authtoken
-   ngrok config add-authtoken YOUR_AUTHTOKEN
-   ```
-
-#### Running with ngrok
-
-1. **Start the gateway** (in one terminal):
-   ```bash
-   # Activate virtual environment
-   source venv/bin/activate
-   
-   # Start the gateway
-   python main.py
-   ```
-
-2. **Start ngrok tunnel** (in another terminal):
-   ```bash
-   # Create public tunnel to the gRPC server
-   ngrok http --upstream-protocol=http2 50051
-   ```
-
-   **Important**: Use the `--upstream-protocol=http2` flag as gRPC requires HTTP/2 protocol.
-
-3. **Access your public gateway**:
-   - ngrok will display a public URL like: `https://abc123.ngrok.io`
-   - This URL can be used by external services to connect to your gateway
-   - The monitoring interface will still be available locally at `http://localhost:8080`
-
-4. **Register with Webex Data Sources API**:
-   - Use the ngrok URL to register your data source with the [Webex Data Sources API](https://developer.webex.com/admin/docs/api/v1/data-sources/register-a-data-source)
-   - This registration is required for Webex Contact Center to establish the BYODS connection
-   - The registered URL will be used for all data exchange between Webex and your gateway
-
-#### ngrok Dashboard
-
-- Access the ngrok web interface at `http://localhost:4040` to monitor requests
-- View real-time traffic, request/response details, and connection status
-- Useful for debugging external connections to your gateway
-
-#### Security Considerations
-
-- **Development Only**: ngrok is intended for development and testing
-- **Temporary URLs**: Free ngrok URLs change each time you restart ngrok
-- **Public Access**: Anyone with the URL can access your gateway
-- **Credentials**: Never expose production credentials through ngrok
-
-#### Example Usage
+### Check Logs
 
 ```bash
-# Terminal 1: Start gateway
-source venv/bin/activate
-python main.py
-
-# Terminal 2: Start ngrok tunnel
-ngrok http --upstream-protocol=http2 50051
-
-# Output example:
-# Forwarding  https://abc123.ngrok.io -> http://localhost:50051
-# 
-# Use this URL in your Webex Contact Center configuration:
-# https://abc123.ngrok.io
+# View gateway logs
+type logs\gateway.log  # Windows
+# tail -f logs/gateway.log  # macOS/Linux
 ```
 
-### Monitoring Interface
+---
 
-Once the server is running, access the web monitoring interface at:
+## Additional Documentation
 
-- **Main Dashboard**: `http://localhost:8080`
-- **Status API**: `http://localhost:8080/api/status`
-- **Connections API**: `http://localhost:8080/api/connections`
-- **Health Check**: `http://localhost:8080/health`
-- **Debug Info**: `http://localhost:8080/api/debug/sessions`
+### Detailed Guides
 
-#### Dashboard Features
+- **[OAuth 2.0 Authentication Guide](docs/OAUTH_AUTHENTICATION.md)** - Complete OAuth setup and troubleshooting
+- **[Dialogflow CX Setup Guide](docs/guides/byova-dialogflow-cx-setup.md)** - Comprehensive Dialogflow CX integration guide
+- **[AWS Lex Setup Guide](docs/guides/byova-aws-lex-setup.md)** - AWS Lex integration guide
 
-- **Real-time Status**: Gateway status and metrics
-- **Active Connections**: Live session tracking
-- **Connection History**: Recent connection events
-- **Available Agents**: List of configured virtual agents
-- **Configuration**: Gateway settings and connector info
+### Development
 
-### Testing
+- **[Connectors Documentation](src/connectors/README.md)** - Creating custom connectors
+- **[Audio Files Guide](audio/README.md)** - Audio format and configuration
+- **[Agent Architecture](AGENTS.MD)** - AI agent guidelines for this project
 
-```bash
-# Test the monitoring interface
-curl http://localhost:8080/api/status
+### API Reference
 
-# Test connection tracking
-curl http://localhost:8080/api/connections
+- **gRPC Endpoints**: `ListVirtualAgents`, `ProcessCallerInput`
+- **HTTP Endpoints**: `/api/status`, `/api/connections`, `/health`
 
-# Create a test session (for development)
-curl http://localhost:8080/api/test/create-session
-```
-
-## API
-
-### gRPC Endpoints
-
-- **ListVirtualAgents**: Returns available virtual agents
-- **ProcessCallerInput**: Handles bidirectional streaming for voice interactions
-
-### HTTP Endpoints
-
-- `GET /`: Main dashboard
-- `GET /api/status`: Gateway status
-- `GET /api/connections`: Connection data
-- `GET /health`: Health check
-- `GET /api/debug/sessions`: Debug information
-
-## Features
-
-- **gRPC Server**: Handles communication with Webex Contact Center
-- **Virtual Agent Router**: Dynamically routes requests to different connector implementations
-- **Local Audio Connector**: Simulates virtual agents using local audio files
-- **AWS Lex Connector**: Integration with Amazon Lex v2 for production virtual agents
-- **Web Monitoring Interface**: Real-time dashboard for monitoring connections and status
-- **Session Management**: Tracks active sessions and connection events
-- **Extensible Architecture**: Easy to add new connector implementations
-
-## Connector Documentation
-
-This gateway supports multiple virtual agent connectors. Each connector has its own documentation:
-
-- **[Connectors Overview](src/connectors/README.md)**: Complete guide to all available connectors and how to create new ones
-- **[Local Audio Connector](src/connectors/README.md#local-audio-connector-local_audio_connectorpy)**: Testing and development with local audio files
-- **[AWS Lex Connector](src/connectors/README.md#aws-lex-connector-aws_lex_connectorpy)**: Production integration with Amazon Lex v2
-- **[Audio Files Guide](audio/README.md)**: Audio file formats, organization, and configuration
+---
 
 ## Project Structure
 
@@ -363,120 +448,91 @@ webex-byova-gateway-python/
 ├── audio/                    # Audio files for local connector
 ├── config/
 │   ├── config.yaml          # Main configuration file
-│   └── aws_lex_example.yaml # AWS Lex configuration example
+│   ├── dialogflow_cx_example.yaml
+│   └── aws_lex_example.yaml
+├── docs/                     # Documentation
+│   ├── guides/
+│   │   ├── byova-dialogflow-cx-setup.md
+│   │   └── byova-aws-lex-setup.md
+│   └── OAUTH_AUTHENTICATION.md
 ├── proto/                    # Protocol Buffer definitions
 ├── src/
-│   ├── connectors/           # Virtual agent connector implementations
-│   │   ├── i_vendor_connector.py
+│   ├── connectors/           # Virtual agent connectors
+│   │   ├── dialogflow_cx_connector.py
 │   │   ├── local_audio_connector.py
-│   │   ├── aws_lex_connector.py
-│   │   └── README.md
+│   │   └── i_vendor_connector.py
 │   ├── core/                # Core gateway components
-│   │   ├── virtual_agent_router.py
-│   │   └── wxcc_gateway_server.py
 │   ├── generated/           # Generated gRPC stubs
-│   │   ├── byova_common_pb2.py
-│   │   ├── byova_common_pb2_grpc.py
-│   │   ├── voicevirtualagent_pb2.py
-│   │   └── voicevirtualagent_pb2_grpc.py
 │   ├── monitoring/          # Web monitoring interface
-│   │   ├── app.py
-│   │   └── templates/
 │   └── utils/               # Utility modules
-├── main.py                  # Main entry point
-├── requirements.txt          # Python dependencies
+├── main.py                  # Entry point
+├── requirements.txt         # Dependencies
 └── README.md
 ```
 
-## Development
+---
 
-### Adding New Connectors
+## Features
 
-1. Create a new connector class in `src/connectors/`
-2. Inherit from `IVendorConnector`
-3. Implement required abstract methods
-4. Add configuration to `config/config.yaml`
-5. Restart the server
+- ✅ **Google Dialogflow CX Integration** - Full support with OAuth 2.0 and ADC
+- ✅ **AWS Lex Integration** - Amazon Lex v2 connector
+- ✅ **Local Audio Connector** - Testing with audio files
+- ✅ **gRPC Server** - BYOVA protocol implementation
+- ✅ **Web Monitoring** - Real-time dashboard
+- ✅ **Session Management** - Track active conversations
+- ✅ **Extensible Architecture** - Easy to add new connectors
 
-### gRPC Stub Generation
-
-The protobuf definitions used in this gateway are sourced from the [Webex dataSourceSchemas repository](https://github.com/webex/dataSourceSchemas), specifically the Voice Virtual Agent schema. These definitions define the structure for BYOVA (Bring Your Own Virtual Agent) data exchange with Webex Contact Center.
-
-If you modify the `.proto` files, you must regenerate the Python stubs:
-
-```bash
-# Regenerate stubs
-python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
-```
-
-**Note**: The generated files are automatically ignored by git (see `.gitignore`). After regenerating, the files will be available locally but won't be committed to the repository.
-
-## Troubleshooting
-
-### Port Conflicts
-
-If port 8080 is in use:
-
-```bash
-# Check what's using the port
-lsof -i :8080
-
-# Kill the process
-kill <PID>
-
-# Or change the port in config/config.yaml
-```
-
-### Virtual Environment Issues
-
-**Problem**: `python: command not found` or import errors
-
-**Solution**: Ensure virtual environment is activated before running any Python commands:
-
-```bash
-# Check if virtual environment is activated
-echo $VIRTUAL_ENV  # Should show path to venv directory
-
-# If not activated, activate it
-source venv/bin/activate
-
-# Verify Python is from virtual environment
-which python  # Should show .../venv/bin/python
-
-# Recreate virtual environment if needed
-rm -rf venv
-python -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**Important**: Always activate the virtual environment before running `python main.py` or any other Python commands.
-
-### Logs
-
-The server provides detailed logging:
-- **INFO**: General operation information
-- **DEBUG**: Detailed request/response tracking
-- **ERROR**: Error conditions and exceptions
-
-Check the terminal output for real-time logs when running manually.
-
-## Maintainers
-
-[@adweeks](https://github.com/adweeks)
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test thoroughly
-5. Submit a pull request
+---
 
 ## License
 
 [Cisco Sample Code License v1.1](LICENSE) © 2018 Cisco and/or its affiliates
 
+**Note**: This Sample Code is not supported by Cisco TAC and is not tested for quality or performance. This is intended for example purposes only and is provided by Cisco "AS IS" with all faults and without warranty or support of any kind.
+
 ---
 
-**Note**: This Sample Code is not supported by Cisco TAC and is not tested for quality or performance. This is intended for example purposes only and is provided by Cisco "AS IS" with all faults and without warranty or support of any kind. 
+## Quick Reference
+
+### Authentication Methods
+
+| Method        | Command                                 | Use Case                     |
+| ------------- | --------------------------------------- | ---------------------------- |
+| **OAuth 2.0** | Configure in `config.yaml`              | Development, user-based auth |
+| **ADC**       | `gcloud auth application-default login` | Production, simple setup     |
+
+### Required IAM Roles
+
+```bash
+# For OAuth or ADC users
+roles/dialogflow.client
+```
+
+### OAuth Scopes
+
+```python
+# Automatically used by the gateway
+https://www.googleapis.com/auth/dialogflow
+```
+
+### Essential Commands
+
+```bash
+# Setup
+python -m venv venv
+venv\Scripts\Activate.ps1
+pip install -r requirements.txt
+
+# Generate gRPC stubs
+python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
+
+# Start gateway
+python main.py
+
+# ADC authentication
+gcloud auth application-default login
+```
+
+---
+
+**Need Help?** Check the [OAuth Authentication Guide](docs/OAUTH_AUTHENTICATION.md) or [Dialogflow CX Setup Guide](docs/guides/byova-dialogflow-cx-setup.md) for detailed instructions.

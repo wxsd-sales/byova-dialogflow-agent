@@ -34,7 +34,7 @@ Webex Contact Center's BYOVA (Bring Your Own Virtual Agent) feature allows you t
 This guide will walk you through the complete process of:
 - Setting up a Webex Contact Center sandbox environment
 - Configuring BYOVA and BYODS (Bring Your Own Data Source)
-- Creating and configuring a AWS Lex bot
+- Creating and configuring an AWS Lex bot
 - Deploying and configuring the BYOVA Gateway
 - Testing your voice AI integration end-to-end
 
@@ -359,7 +359,7 @@ Once the local connector is working correctly, you can proceed to set up AWS Lex
 
 ## Step 4: Setting Up AWS Lex
 
-### 4.1 Create a AWS account
+### 4.1 Create an AWS account
 
 If you already have an AWS account, skip this step. If you don't have an AWS account, use the following procedure to create one.
 

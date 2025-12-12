@@ -230,6 +230,27 @@ temp/
 *.crt
 *.p12
 
+# Google Cloud & OAuth credentials (SECURITY CRITICAL)
+*.pickle
+*_token.pickle
+oauth_token*.pickle
+dialogflow_oauth_token.pickle
+*-key.json
+*_credentials.json
+client_secret*.json
+service-account*.json
+gcp-credentials.json
+
+# AWS credentials
+.aws/
+*.pem
+credentials
+
+# API keys and secrets
+secrets/
+.secrets/
+*.secret
+
 # Backup files
 *.bak
 *.backup
