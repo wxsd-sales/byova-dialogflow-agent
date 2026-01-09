@@ -103,7 +103,7 @@ class DialogflowCXConnector(IVendorConnector):
         self.language_code = config.get("language_code", "en-US")
         self.sample_rate_hertz = config.get("sample_rate_hertz", 8000)
         self.audio_encoding = config.get("audio_encoding", "AUDIO_ENCODING_MULAW")
-        self.agents = config.get("agents", ["Dialogflow CX Agent"])
+        self.agents = config.get("agents", ["Dialogflow CX Agent OAuth"])
         
         # Force specific input format (bypasses auto-detection)
         # Set to "wxcc" for WxCC calls (8kHz MULAW), "test" for test files, or leave empty for auto
@@ -114,6 +114,7 @@ class DialogflowCXConnector(IVendorConnector):
         self.max_audio_seconds = config.get("max_audio_seconds", 5.0)  # Force process at 5s
         
         # Authentication configuration
+        access_token = config.get("access_token")
         service_account_key_path = config.get("service_account_key")
         oauth_client_id = config.get("oauth_client_id")
         oauth_client_secret = config.get("oauth_client_secret")
@@ -123,15 +124,27 @@ class DialogflowCXConnector(IVendorConnector):
         self.credentials = None
         auth_method = None
         
-        # Option 1: Service Account Key File
-        if service_account_key_path and os.path.exists(service_account_key_path):
+        # Option 1: Direct Access Token (no auto-refresh)
+        # Reference: https://google-auth.readthedocs.io/en/master/reference/google.oauth2.credentials.html
+        # WARNING: Access tokens expire in ~1 hour and will NOT be refreshed
+        if access_token:
+            from google.oauth2.credentials import Credentials
+            self.credentials = Credentials(token=access_token)
+            auth_method = "Direct Access Token (expires in ~1 hour, no auto-refresh)"
+            self.logger.info("Using direct access token")
+            self.logger.warning("⚠️  Access token will expire in ~1 hour without refresh!")
+            
+        # Option 2: Service Account Key File
+        # Reference: https://google-auth.readthedocs.io/en/master/reference/google.oauth2.service_account.html
+        elif service_account_key_path and os.path.exists(service_account_key_path):
             self.credentials = service_account.Credentials.from_service_account_file(
                 service_account_key_path
             )
             auth_method = f"Service Account Key: {service_account_key_path}"
             self.logger.info(f"Loaded service account from {service_account_key_path}")
             
-        # Option 2: OAuth 2.0 User Credentials
+        # Option 3: OAuth 2.0 User Credentials (with auto-refresh)
+        # Reference: https://developers.google.com/identity/protocols/oauth2
         elif oauth_client_id and oauth_client_secret:
             self.credentials = self._get_oauth_credentials(
                 oauth_client_id, 
@@ -141,7 +154,8 @@ class DialogflowCXConnector(IVendorConnector):
             auth_method = f"OAuth 2.0: {oauth_token_file}"
             self.logger.info(f"Using OAuth 2.0 credentials from {oauth_token_file}")
             
-        # Option 3: Application Default Credentials (ADC)
+        # Option 4: Application Default Credentials (ADC)
+        # Reference: https://cloud.google.com/docs/authentication/application-default-credentials
         else:
             auth_method = "Application Default Credentials (ADC)"
             self.logger.info("Using Application Default Credentials (ADC)")
