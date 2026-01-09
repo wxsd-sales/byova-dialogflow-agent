@@ -22,8 +22,8 @@ A Python-based gateway for Webex Contact Center (WxCC) that provides virtual age
 
 ```bash
 # Clone the repository
-git clone https://github.com/webex/webex-byova-gateway-python.git
-cd webex-byova-gateway-python
+git clone https://github.com/wxsd-sales/byova-dialogflow-agent.git
+cd byova-dialogflow-agent
 
 # Create virtual environment
 python -m venv venv
