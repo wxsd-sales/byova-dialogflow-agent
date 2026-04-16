@@ -1,4 +1,4 @@
-# Webex Contact Center BYOVA Gateway
+# Dialogflow CX BYOVA Gateway
 
 [![License: Cisco Sample Code](https://img.shields.io/badge/License-Cisco%20Sample%20Code-blue.svg)](LICENSE)
 
@@ -145,7 +145,7 @@ gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
 
 ---
 
-## Optional: Webex access token refresh & BYODS URL
+## Webex access token refresh & BYODS URL
 
 If you use a **Webex integration** (service app) to refresh access tokens or update the **BYOVA data source** URL in Control Hub:
 
@@ -174,7 +174,7 @@ If `WEBEX_DATASOURCE_SCHEMA_ID` is not set, token refresh still runs; the data-s
 
 ---
 
-## Optional: Workload Identity Federation (WIF)
+## Workload Identity Federation (WIF)
 
 For **Google WIF** with an external OIDC token:
 
