@@ -6,6 +6,7 @@ allowing administrators to check the status of virtual agents and active session
 """
 
 import logging
+import socket
 import threading
 from datetime import datetime
 from typing import TYPE_CHECKING, Any, Dict, Optional
@@ -168,6 +169,36 @@ def api_connections():
         return jsonify({"error": str(e)}), 500
 
 
+@app.route("/api/grpc-activity")
+def api_grpc_activity():
+    """
+    API endpoint for gRPC server (port 50052) activity.
+    Use this to verify the gateway is receiving ListVirtualAgents / ProcessCallerInput.
+    """
+    try:
+        if not gateway_server_instance:
+            return jsonify(
+                {
+                    "recent": [],
+                    "counts": {},
+                    "message": "Gateway server not available",
+                }
+            )
+        if not hasattr(gateway_server_instance, "get_grpc_activity"):
+            return jsonify(
+                {
+                    "recent": [],
+                    "counts": {},
+                    "message": "get_grpc_activity not available",
+                }
+            )
+        data = gateway_server_instance.get_grpc_activity()
+        return jsonify(data)
+    except Exception as e:
+        logger.error(f"Error getting gRPC activity: {e}")
+        return jsonify({"error": str(e), "recent": [], "counts": {}}), 500
+
+
 @app.route("/api/debug/sessions")
 def api_debug_sessions():
     """
@@ -311,7 +342,7 @@ def get_configuration_data() -> Dict[str, Any]:
             "name": "BYOVA Gateway",
             "version": "1.0.0",
             "host": "0.0.0.0",
-            "grpc_port": 50051,
+            "grpc_port": 50052,
             "web_port": 8080,
         },
         "connectors": [],
@@ -425,6 +456,43 @@ def health_check():
             "status": "healthy",
             "service": "BYOVA Gateway Monitoring",
             "timestamp": datetime.now().isoformat(),
+        }
+    )
+
+
+def _check_grpc_port_open(host: str = "127.0.0.1", port: int = 50052) -> bool:
+    """Try to open a TCP connection to the gRPC port. Returns True if something is listening."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.settimeout(2.0)
+            s.connect((host, port))
+            return True
+    except (socket.error, socket.timeout, OSError):
+        return False
+
+
+@app.route("/api/grpc-health")
+def api_grpc_health():
+    """
+    Check if the gRPC server on port 50052 is listening (TCP connect).
+    Use this to verify the server is running. Note: port 50052 is gRPC, not HTTP,
+    so opening it in a browser will not work; use this endpoint instead (on port 8080).
+    """
+    import os
+    port = int(os.environ.get("GATEWAY_GRPC_PORT", "50052"))
+    host = os.environ.get("GATEWAY_GRPC_HOST", "127.0.0.1")
+    is_open = _check_grpc_port_open(host, port)
+    return jsonify(
+        {
+            "grpc_port": port,
+            "grpc_host": host,
+            "port_open": is_open,
+            "message": (
+                f"gRPC server on {host}:{port} is listening."
+                if is_open
+                else f"Nothing is listening on {host}:{port}. Start the gateway with: python main.py"
+            ),
+            "note": "Port 50052 uses gRPC, not HTTP. Use this endpoint (on 8080) or run scripts/test_grpc_server.py to test.",
         }
     )
 

@@ -25,6 +25,60 @@ from monitoring.app import run_web_app
 from src.generated.voicevirtualagent_pb2_grpc import add_VoiceVirtualAgentServicer_to_server
 
 
+def _resolve_tls_path(project_root: Path, path_str: str) -> Path:
+    p = Path(path_str)
+    return p if p.is_absolute() else (project_root / p)
+
+
+def load_grpc_server_credentials(
+    project_root: Path, tls_config: dict
+) -> grpc.ServerCredentials:
+    """
+    Build gRPC TLS server credentials from PEM files.
+
+    tls_config keys:
+      - server_cert_chain_file: PEM with server certificate + intermediate CAs (leaf first)
+      - server_private_key_file: PEM private key
+      - root_ca_cert_file: optional PEM CA bundle for verifying client certs (mutual TLS)
+      - require_client_cert: if true, clients must present a cert signed by root_ca_cert_file
+    """
+    chain_path = _resolve_tls_path(
+        project_root, tls_config["server_cert_chain_file"]
+    )
+    key_path = _resolve_tls_path(
+        project_root, tls_config["server_private_key_file"]
+    )
+    if not chain_path.is_file():
+        raise FileNotFoundError(f"TLS server cert chain not found: {chain_path}")
+    if not key_path.is_file():
+        raise FileNotFoundError(f"TLS server private key not found: {key_path}")
+
+    with open(key_path, "rb") as f:
+        private_key = f.read()
+    with open(chain_path, "rb") as f:
+        certificate_chain = f.read()
+
+    root_ca = None
+    require_client = bool(tls_config.get("require_client_cert", False))
+    if require_client:
+        ca_path = tls_config.get("root_ca_cert_file")
+        if not ca_path:
+            raise ValueError(
+                "tls.require_client_cert is true but root_ca_cert_file is not set"
+            )
+        ca_resolved = _resolve_tls_path(project_root, ca_path)
+        if not ca_resolved.is_file():
+            raise FileNotFoundError(f"TLS client CA not found: {ca_resolved}")
+        with open(ca_resolved, "rb") as f:
+            root_ca = f.read()
+
+    return grpc.ssl_server_credentials(
+        ((private_key, certificate_chain),),
+        root_certificates=root_ca,
+        require_client_auth=require_client,
+    )
+
+
 def setup_logging(config: dict) -> None:
     """
     Set up logging configuration.
@@ -210,7 +264,10 @@ def main():
         # Get server configuration
         gateway_config = config.get("gateway", {})
         host = gateway_config.get("host", "0.0.0.0")
-        port = gateway_config.get("port", 50051)
+        port = gateway_config.get("port", 50052)
+        tls_config = gateway_config.get("tls") or {}
+        tls_enabled = bool(tls_config.get("enabled", False))
+        project_root = Path(__file__).resolve().parent
 
         # Create gRPC server
         grpc_server = grpc.server(
@@ -227,11 +284,20 @@ def main():
             server, grpc_server
         )
 
-        # Bind server to address
-        server_address = f"{host}:{port}"
-        grpc_server.add_insecure_port(server_address)
+        # Bind gRPC: TLS (grpcs) or plaintext (grpc)
+        if tls_enabled:
+            creds = load_grpc_server_credentials(project_root, tls_config)
+            grpc_server.add_secure_port(f"{host}:{port}", creds)
+            logger.info(
+                "gRPC TLS enabled on %s:%s (clients must use secure_channel / grpcs)",
+                host,
+                port,
+            )
+            server_address = f"{host}:{port} (TLS)"
+        else:
+            grpc_server.add_insecure_port(f"{host}:{port}")
+            server_address = f"{host}:{port}"
 
-        # Start the server
         grpc_server.start()
 
         # Start Flask monitoring app in a separate thread
@@ -258,38 +324,41 @@ def main():
 
         # Print startup information
         print("\n" + "=" * 60)
-        print("🚀 Webex Contact Center BYOVA Gateway")
+        print(">>> Webex Contact Center BYOVA Gateway")
         print("=" * 60)
-        print(f"📡 gRPC Server: {server_address}")
-        print(f"🌐 Access URL: grpc://{host}:{port}")
-        print(f"📁 Configuration: {config_path}")
-        print(f"📝 Log Level: {gateway_config.get('level', 'INFO')}")
-        print(f"🔧 Gateway Version: {gateway_config.get('version', '1.0.0')}")
+        print(f">>> gRPC Server: {server_address}")
+        if tls_enabled:
+            print(f">>> Access URL: grpcs://{host}:{port} (TLS; use secure_channel from clients)")
+        else:
+            print(f">>> Access URL: grpc://{host}:{port}")
+        print(f">>> Configuration: {config_path}")
+        print(f">>> Log Level: {gateway_config.get('level', 'INFO')}")
+        print(f">>> Gateway Version: {gateway_config.get('version', '1.0.0')}")
         print()
 
         # Print connector information
-        print("🔌 Loaded Connectors:")
+        print(">>> Loaded Connectors:")
         router_info = router.get_connector_info()
         for connector_name in router_info["loaded_connectors"]:
-            print(f"   • {connector_name}")
+            print(f"   - {connector_name}")
 
         print()
-        print("🎯 Available Agents:")
+        print(">>> Available Agents:")
         available_agents = router.get_all_available_agents()
         for agent in available_agents:
-            print(f"   • {agent}")
+            print(f"   - {agent}")
 
         print()
-        print("📊 Monitoring Interface:")
+        print(">>> Monitoring Interface:")
         if monitoring_config.get("enabled", True):
-            print(f"   • Web UI: http://{monitoring_host}:{monitoring_port}")
-            print(f"   • Status: http://{monitoring_host}:{monitoring_port}/status")
-            print(f"   • Health: http://{monitoring_host}:{monitoring_port}/health")
+            print(f"   - Web UI: http://{monitoring_host}:{monitoring_port}")
+            print(f"   - Status: http://{monitoring_host}:{monitoring_port}/status")
+            print(f"   - Health: http://{monitoring_host}:{monitoring_port}/health")
         else:
-            print("   • Disabled")
+            print("   - Disabled")
 
         print()
-        print("✅ Gateway is running! Press Ctrl+C to stop.")
+        print(">>> Gateway is running! Press Ctrl+C to stop.")
         print("=" * 60)
 
         # Keep the server running

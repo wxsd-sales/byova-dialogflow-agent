@@ -1,0 +1,5 @@
+{
+  "access_token": "PASTE_SHORT_LIVED_JWT_FROM_YOUR_IDENTITY_PROVIDER",
+  "token_type": "Bearer",
+  "expires_in": 3600
+}

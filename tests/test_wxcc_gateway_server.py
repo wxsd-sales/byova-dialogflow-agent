@@ -74,7 +74,9 @@ class TestConversationProcessor:
             "message_type": "response",
             "text": "Hello, how can I help you?",
             "audio_content": b"audio_response_bytes",
-            "barge_in_enabled": True
+            "barge_in_enabled": True,
+            "user_transcript": "hi there",
+            "language_code": "en-US",
         }
         mock_router.route_request.return_value = mock_response
 
@@ -98,6 +100,9 @@ class TestConversationProcessor:
         assert len(responses) == 1
         assert responses[0].prompts[0].text == "Hello, how can I help you?"
         assert responses[0].prompts[0].audio_content == b"audio_response_bytes"
+        assert "User: hi there" in responses[0].session_transcript.text
+        assert "Agent: Hello, how can I help you?" in responses[0].session_transcript.text
+        assert responses[0].session_transcript.language_code == "en-US"
 
     def test_process_audio_input_with_session_end_event(self, processor, mock_router, mock_audio_input):
         """Test processing audio input with SESSION_END event from connector."""

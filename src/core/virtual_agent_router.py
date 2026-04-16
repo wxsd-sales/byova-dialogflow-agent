@@ -68,7 +68,7 @@ class VirtualAgentRouter:
                                "class": "VendorXConnector",
                                "module": "connectors.vendor_x_connector",
                                "config": {
-                                   "api_key": "xxx",
+                                   "api_key": "${VENDOR_API_KEY}",
                                    "endpoint": "https://api.vendorx.com"
                                }
                            }

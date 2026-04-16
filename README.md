@@ -2,537 +2,251 @@
 
 [![License: Cisco Sample Code](https://img.shields.io/badge/License-Cisco%20Sample%20Code-blue.svg)](LICENSE)
 
-A Python-based gateway for Webex Contact Center (WxCC) that provides virtual agent integration with Google Dialogflow CX and other platforms. This gateway acts as a bridge between WxCC and virtual agent providers, enabling seamless voice interactions.
+Python gateway between **Webex Contact Center (WxCC)** and virtual agent backends (e.g. **Google Dialogflow CX**, AWS Lex). It implements the BYOVA gRPC service and routes audio to your connector.
 
-## Table of Contents
+This README is the **single setup guide**: prerequisites, secrets, Google authentication, optional Webex token refresh, TLS, running the server, and troubleshooting.
 
-- [Quick Start](#quick-start)
-- [Google Dialogflow CX Setup](#google-dialogflow-cx-setup)
-  - [Prerequisites](#prerequisites)
-  - [Authentication Options](#authentication-options)
-  - [Option 1: OAuth 2.0 Setup](#option-1-oauth-20-setup)
-  - [Option 2: Application Default Credentials (ADC)](#option-2-application-default-credentials-adc)
-- [Running the Gateway](#running-the-gateway)
-- [Monitoring](#monitoring)
-- [Additional Documentation](#additional-documentation)
+---
 
-## Quick Start
+## Table of contents
 
-### 1. Clone and Setup
+1. [Prerequisites](#prerequisites)
+2. [Security: files and values never to commit](#security-files-and-values-never-to-commit)
+3. [Quick start](#quick-start)
+4. [Configuration](#configuration)
+5. [Google Dialogflow CX — authentication](#google-dialogflow-cx--authentication)
+6. [Optional: Webex access token refresh & BYODS URL](#optional-webex-access-token-refresh--byods-url)
+7. [Optional: Workload Identity Federation (WIF)](#optional-workload-identity-federation-wif)
+8. [TLS](#tls)
+9. [Run the gateway](#run-the-gateway)
+10. [Monitoring](#monitoring)
+11. [Troubleshooting](#troubleshooting)
+12. [Further reading](#further-reading)
+13. [License](#license)
+
+---
+
+## Prerequisites
+
+- **Python 3.8+**
+- **Google Cloud**: project with **Dialogflow API** enabled, Dialogflow CX agent created
+- **Webex Contact Center** environment if you are testing end-to-end with WxCC
+- **gRPC stubs** generated from `proto/` (see [Quick start](#quick-start))
+
+---
+
+## Security: files and values never to commit
+
+| Item | Notes |
+|------|--------|
+| `oauth_token.pickle` / `*_oauth_token.pickle` | Google OAuth user tokens |
+| `client_secret*.json`, `*-key.json`, service account JSON | Google credentials |
+| `config/webex_oauth_secrets.json`, `config/webex_token.json`, `config/webex_access_token.txt` | Webex OAuth / access tokens |
+| `wif-config.json`, `oidc_token.json` | Workload Identity Federation and OIDC JWT |
+| TLS `*.pem`, `*.key` | Certificates and keys |
+| **Any** real `project_id`, client secrets, refresh tokens, or JWTs in YAML/JSON | Use placeholders in examples |
+
+Copy the **example** files and fill in locally (examples are safe to commit):
+
+- `config/webex_oauth_secrets.example.json` → `config/webex_oauth_secrets.json` (gitignored)
+- `config/wif-config.json.example` → `wif-config.json` (gitignored)
+- `oidc_token.json.example` → `oidc_token.json` (gitignored)
+
+`.gitignore` already excludes common secret paths; verify before every push.
+
+---
+
+## Quick start
 
 ```bash
-# Clone the repository
-git clone https://github.com/wxsd-sales/byova-dialogflow-agent.git
-cd byova-dialogflow-agent
+git clone <your-fork-or-repo-url>
+cd webex-byova-gateway-python
 
-# Create virtual environment
 python -m venv venv
-
-# Activate virtual environment
 # Windows:
 venv\Scripts\Activate.ps1
 # macOS/Linux:
-source venv/bin/activate
+# source venv/bin/activate
 
-# Install dependencies
 pip install -r requirements.txt
 
-# Generate gRPC stubs
 python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
 ```
 
-### 2. Configure Authentication
+Edit `config/config.yaml`: set `project_id`, `agent_id`, and `location` for Dialogflow CX (see [Configuration](#configuration)).
 
-Choose one of two authentication methods:
-
-- **OAuth 2.0** - Best for development and testing
-- **Application Default Credentials (ADC)** - Best for production
-
-See [Authentication Options](#authentication-options) below.
-
-### 3. Start the Gateway
+Choose a [Google authentication](#google-dialogflow-cx--authentication) method, then:
 
 ```bash
-# Make sure virtual environment is activated
 python main.py
 ```
 
-Access the monitoring interface at: http://localhost:8080
+Open **http://localhost:8080** for the monitoring UI (port from `config/config.yaml`).
 
 ---
 
-## Google Dialogflow CX Setup
+## Configuration
 
-### Prerequisites
+Main file: **`config/config.yaml`**.
 
-Before connecting to Google Dialogflow CX, you need:
+Minimal connector block (placeholders):
 
-1. **Google Cloud Account** with billing enabled
-2. **Dialogflow CX Agent** created and configured
-3. **Python 3.8+** installed
-4. **Webex Contact Center** environment for testing
+```yaml
+connectors:
+  dialogflow_cx_connector:
+    type: "dialogflow_cx_connector"
+    class: "DialogflowCXConnector"
+    module: "connectors.dialogflow_cx_connector"
+    config:
+      project_id: "YOUR_GCP_PROJECT_ID"
+      agent_id: "YOUR_DIALOGFLOW_CX_AGENT_ID"
+      location: "global"
+      language_code: "en-US"
+      sample_rate_hertz: 16000
+      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
+      force_input_format: "wxcc"
+      agents:
+        - "Dialogflow CX Agent"
+```
 
-### Enable Dialogflow API
+- **`gateway.port`**: gRPC listen port (WxCC / your network must reach `host:port`).
+- **`force_input_format: wxcc`**: Typical for WxCC telephony (8 kHz μ-law); adjust if you use different audio.
+- More options: see `config/dialogflow_cx_example.yaml` and `config/config_example.yaml`.
+
+---
+
+## Google Dialogflow CX — authentication
+
+Enable the API:
 
 ```bash
-# Using gcloud CLI
 gcloud services enable dialogflow.googleapis.com
-
-# Or enable in Google Cloud Console:
-# https://console.cloud.google.com/apis/library/dialogflow.googleapis.com
 ```
 
-### Get Your Project Information
+Grant your user or service account **`roles/dialogflow.client`** (or equivalent) on the project.
 
-You'll need these from Google Cloud Console:
+The connector supports (in rough priority order):
 
-- **Project ID**: Your Google Cloud project ID
-- **Agent ID**: Your Dialogflow CX agent ID (found in agent settings)
-- **Location**: Where your agent is hosted (e.g., `global`, `us-central1`)
+1. **Workload Identity Federation** — set `GOOGLE_APPLICATION_CREDENTIALS` to a `wif-config.json` path (see [WIF](#optional-workload-identity-federation-wif)).
+2. **Short-lived access token** — `access_token` in config or `GCP_ACCESS_TOKEN` env (expires ~1h; no auto-refresh in code).
+3. **Service account JSON** — `service_account_key` in config.
+4. **OAuth 2.0 (user)** — `oauth_client_id`, `oauth_client_secret`, optional `oauth_token_file` (default `oauth_token.pickle`). First run opens a browser; redirect URI **must** include `http://localhost:8090/` in Google Cloud Console.
+5. **Application Default Credentials (ADC)** — if none of the above apply: run `gcloud auth application-default login` and omit OAuth/service account fields.
 
----
+**OAuth redirect URI:** add exactly `http://localhost:8090/` to the OAuth client (Desktop app) in Google Cloud Console and wait a few minutes after saving.
 
-## Authentication Options
-
-The gateway supports two authentication methods for Google Dialogflow CX:
-
-| Method        | Best For                 | Setup Time | Complexity |
-| ------------- | ------------------------ | ---------- | ---------- |
-| **OAuth 2.0** | Development, Testing     | 5 minutes  | Medium     |
-| **ADC**       | Production, Simple Setup | 2 minutes  | Low        |
-
----
-
-## Option 1: OAuth 2.0 Setup
-
-OAuth 2.0 provides user-based authentication. Best for development when you want to test with your own Google account.
-
-### Step 1: Create OAuth 2.0 Credentials
-
-1. Go to [Google Cloud Console - Credentials](https://console.cloud.google.com/apis/credentials)
-2. Click **+ CREATE CREDENTIALS** > **OAuth client ID**
-3. Choose **Application type**: `Desktop app`
-4. Enter a name (e.g., "BYOVA Gateway")
-5. Click **CREATE**
-6. **Copy** the Client ID and Client Secret
-
-### Step 2: Add Redirect URI
-
-1. Click the **edit icon** (pencil) next to your OAuth client
-2. In **Authorized redirect URIs**, add:
-   ```
-   http://localhost:8090/
-   ```
-3. Click **SAVE**
-4. **Wait 5 minutes** for changes to propagate
-
-### Step 3: Configure Gateway
-
-Edit `config/config.yaml`:
-
-```yaml
-connectors:
-  dialogflow_cx_connector:
-    type: "dialogflow_cx_connector"
-    class: "DialogflowCXConnector"
-    module: "connectors.dialogflow_cx_connector"
-    config:
-      # Your Dialogflow CX details
-      project_id: "your-project-id"
-      agent_id: "your-agent-id"
-      location: "global"
-
-      # OAuth 2.0 credentials
-      oauth_client_id: "YOUR_CLIENT_ID.apps.googleusercontent.com"
-      oauth_client_secret: "YOUR_CLIENT_SECRET"
-      oauth_token_file: "oauth_token.pickle"
-
-      # Audio settings
-      language_code: "en-US"
-      sample_rate_hertz: 16000
-      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
-      force_input_format: "wxcc"
-
-      agents:
-        - "Dialogflow CX Agent"
-```
-
-### Step 4: Grant User Permissions
+**IAM example:**
 
 ```bash
-# Grant Dialogflow permissions to your Google account
 gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-    --member="user:your-email@gmail.com" \
-    --role="roles/dialogflow.client"
+  --member="user:your-email@example.com" \
+  --role="roles/dialogflow.client"
 ```
-
-### Step 5: Start Gateway (First Time)
-
-```bash
-# Activate virtual environment
-venv\Scripts\Activate.ps1  # Windows
-# source venv/bin/activate  # macOS/Linux
-
-# Start gateway
-python main.py
-```
-
-**What happens:**
-
-1. Browser opens automatically
-2. Sign in with your Google account
-3. Click **Allow** to grant permissions
-4. Token is saved to `oauth_token.pickle`
-5. Gateway starts successfully
-
-**Subsequent runs:** Just run `python main.py` - no browser needed!
 
 ---
 
-## Option 2: Application Default Credentials (ADC)
+## Optional: Webex access token refresh & BYODS URL
 
-ADC is the simplest method. Best for production and when you want a one-time setup.
+If you use a **Webex integration** (service app) to refresh access tokens or update the **BYOVA data source** URL in Control Hub:
 
-### Step 1: Authenticate with Google
+1. Install `requests` if needed: `pip install requests`.
+2. Copy `config/webex_oauth_secrets.example.json` to `config/webex_oauth_secrets.json` and fill in **client_id**, **client_secret**, **refresh_token** from your Webex developer / admin flow.
+3. Optionally set **`datasource_id`** and **`datasource_url`** (your gateway’s public `https://host:port` gRPC endpoint as required by your organization).
 
-```powershell
-# Authenticate with your Google account
-gcloud auth application-default login
-```
+**Environment variables** (alternative to the JSON file for secrets):
 
-This will:
+| Variable | Purpose |
+|----------|---------|
+| `WEBEX_CLIENT_ID`, `WEBEX_CLIENT_SECRET`, `WEBEX_REFRESH_TOKEN` | OAuth refresh |
+| `WEBEX_SECRETS_FILE` | Path to JSON secrets file (default `config/webex_oauth_secrets.json`) |
+| `WEBEX_ACCESS_TOKEN_FILE` | Where to write the new access token (default `config/webex_access_token.txt`) |
+| `WEBEX_TOKEN_JSON_FILE` | Optional full JSON response path |
+| `WEBEX_DATASOURCE_ID`, `WEBEX_DATASOURCE_URL` | BYODS data source UUID and gateway URL |
+| `WEBEX_DATASOURCE_SCHEMA_ID` | Schema UUID for the data source **PUT** payload (from Webex / org documentation) |
 
-1. Open your browser
-2. Sign in with Google
-3. Save credentials automatically
-4. Work for all Google Cloud APIs
-
-### Step 2: Grant User Permissions
-
-```bash
-# Grant Dialogflow permissions to your account
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-    --member="user:your-email@gmail.com" \
-    --role="roles/dialogflow.client"
-```
-
-### Step 3: Configure Gateway
-
-Edit `config/config.yaml`:
-
-```yaml
-connectors:
-  dialogflow_cx_connector:
-    type: "dialogflow_cx_connector"
-    class: "DialogflowCXConnector"
-    module: "connectors.dialogflow_cx_connector"
-    config:
-      # Your Dialogflow CX details
-      project_id: "your-project-id"
-      agent_id: "your-agent-id"
-      location: "global"
-
-      # No oauth_client_id or oauth_client_secret = uses ADC automatically
-
-      # Audio settings
-      language_code: "en-US"
-      sample_rate_hertz: 16000
-      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
-      force_input_format: "wxcc"
-
-      agents:
-        - "Dialogflow CX Agent"
-```
-
-### Step 4: Start Gateway
+Run:
 
 ```bash
-# Activate virtual environment
-venv\Scripts\Activate.ps1  # Windows
-# source venv/bin/activate  # macOS/Linux
-
-# Start gateway
-python main.py
+python scripts/refresh_webex_token.py
 ```
 
-That's it! ADC is automatically used.
+If `WEBEX_DATASOURCE_SCHEMA_ID` is not set, token refresh still runs; the data-source **PUT** is skipped with a warning until you set it.
 
 ---
 
-## Running the Gateway
+## Optional: Workload Identity Federation (WIF)
 
-### Start the Server
+For **Google WIF** with an external OIDC token:
+
+1. Create `wif-config.json` from **`config/wif-config.json.example`** using values from Google Cloud (pool, provider, service account to impersonate).
+2. Place **`oidc_token.json`** next to it (see **`oidc_token.json.example`**) with a short-lived JWT from your identity provider.
+3. Set in `config/config.yaml` (or env):
+
+   - `wif_config_path` / `GOOGLE_APPLICATION_CREDENTIALS` → path to `wif-config.json`
+
+Rotate OIDC tokens as required by your IdP. Do not commit real `wif-config.json` or `oidc_token.json`.
+
+---
+
+## TLS
+
+- **Recommended in production:** terminate TLS on a **load balancer** or reverse proxy and forward plain gRPC to this app on your internal port.
+- **In-process TLS:** uncomment `gateway.tls` in `config/config.yaml` and place PEM files under `config/certs/` (see `config/certs/README.md`). Do not commit private keys.
+
+---
+
+## Run the gateway
 
 ```bash
-# 1. Activate virtual environment (REQUIRED)
-venv\Scripts\Activate.ps1  # Windows
+venv\Scripts\Activate.ps1   # Windows
 # source venv/bin/activate  # macOS/Linux
 
-# 2. Start the gateway
 python main.py
 ```
 
-### Verify It's Running
+Expected log lines include Dialogflow connector initialization and the gRPC server listening on the configured port.
 
-Look for these messages:
-
-```
-INFO - DialogflowCXConnector initialized for agent: projects/your-project/locations/global/agents/your-agent
-INFO - Dialogflow CX SessionsClient initialized successfully
-INFO - Server started on port 50051
-INFO - Monitoring interface available at http://0.0.0.0:8080
-```
-
-### Stop the Server
-
-Press `Ctrl+C` in the terminal
+Stop with **Ctrl+C**.
 
 ---
 
 ## Monitoring
 
-### Web Interface
-
-Once running, access the monitoring dashboard:
-
-- **Main Dashboard**: http://localhost:8080
-- **Status API**: http://localhost:8080/api/status
-- **Health Check**: http://localhost:8080/health
-
-### Dashboard Features
-
-- **Real-time Status**: Gateway and connector status
-- **Active Connections**: Live session tracking
-- **Available Agents**: Configured Dialogflow CX agents
-- **Configuration**: View current settings
-
----
-
-## Configuration Reference
-
-### Complete Configuration Example
-
-```yaml
-# Gateway settings
-gateway:
-  host: "0.0.0.0"
-  port: 50051
-
-# Monitoring interface
-monitoring:
-  enabled: true
-  host: "0.0.0.0"
-  port: 8080
-
-# Connectors
-connectors:
-  dialogflow_cx_connector:
-    type: "dialogflow_cx_connector"
-    class: "DialogflowCXConnector"
-    module: "connectors.dialogflow_cx_connector"
-    config:
-      # Required: Google Cloud project ID
-      project_id: "your-project-id"
-
-      # Required: Dialogflow CX agent ID
-      agent_id: "your-agent-id"
-
-      # Required: Agent location
-      location: "global"
-
-      # Optional: OAuth 2.0 credentials (if using OAuth)
-      # oauth_client_id: "YOUR_CLIENT_ID.apps.googleusercontent.com"
-      # oauth_client_secret: "YOUR_CLIENT_SECRET"
-      # oauth_token_file: "oauth_token.pickle"
-
-      # Audio settings for WxCC
-      language_code: "en-US"
-      sample_rate_hertz: 16000
-      audio_encoding: "AUDIO_ENCODING_LINEAR_16"
-      force_input_format: "wxcc"
-      min_audio_seconds: 2.5
-      max_audio_seconds: 5.0
-
-      # Agent names exposed to WxCC
-      agents:
-        - "Dialogflow CX Agent"
-
-# Logging
-logging:
-  gateway:
-    level: "INFO"
-    format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-    file: "logs/gateway.log"
-```
+| URL | Purpose |
+|-----|---------|
+| http://localhost:8080 | Dashboard (if `monitoring.enabled`) |
+| http://localhost:8080/api/status | JSON status |
+| http://localhost:8080/health | Health check |
 
 ---
 
 ## Troubleshooting
 
-### OAuth Errors
-
-**Error: "redirect_uri_mismatch"**
-
-- Add `http://localhost:8090/` to OAuth redirect URIs in Google Cloud Console
-- Include the trailing slash `/`
-- Wait 5 minutes after saving
-
-**Error: "invalid_client"**
-
-- Verify Client ID and Client Secret are correct
-- Check for extra spaces or line breaks in config.yaml
-
-### ADC Errors
-
-**Error: "Could not automatically determine credentials"**
-
-```bash
-# Re-authenticate
-gcloud auth application-default login
-```
-
-**Error: "Permission denied"**
-
-```bash
-# Grant Dialogflow permissions
-gcloud projects add-iam-policy-binding YOUR_PROJECT_ID \
-    --member="user:your-email@gmail.com" \
-    --role="roles/dialogflow.client"
-```
-
-### Port Already in Use
-
-```powershell
-# Windows - Find and kill process on port 50051
-netstat -ano | findstr :50051
-taskkill /PID <PID_NUMBER> /F
-
-# Or change port in config/config.yaml
-```
-
-### Check Logs
-
-```bash
-# View gateway logs
-type logs\gateway.log  # Windows
-# tail -f logs/gateway.log  # macOS/Linux
-```
+| Issue | What to try |
+|-------|-------------|
+| `redirect_uri_mismatch` (Google OAuth) | Add `http://localhost:8090/` to OAuth client redirect URIs; include trailing slash; wait a few minutes. |
+| `invalid_client` (Google OAuth) | Check client ID/secret; no extra spaces in `config.yaml`. |
+| `Could not automatically determine credentials` (ADC) | Run `gcloud auth application-default login`. |
+| Permission denied on Dialogflow | Grant `roles/dialogflow.client` to the signed-in user or service account. |
+| Port in use | Change `gateway.port` or free the port (`netstat` / `taskkill` on Windows). |
 
 ---
 
-## Additional Documentation
+## Further reading
 
-### Detailed Guides
+| Topic | Location |
+|-------|----------|
+| Dialogflow CX setup (longer walkthrough) | [docs/guides/byova-dialogflow-cx-setup.md](docs/guides/byova-dialogflow-cx-setup.md) |
+| AWS Lex setup | [docs/guides/byova-aws-lex-setup.md](docs/guides/byova-aws-lex-setup.md) |
+| Custom connectors | [src/connectors/README.md](src/connectors/README.md) |
+| AI/agent notes for this repo | [AGENTS.MD](AGENTS.MD) |
 
-- **[OAuth 2.0 Authentication Guide](docs/OAUTH_AUTHENTICATION.md)** - Complete OAuth setup and troubleshooting
-- **[Dialogflow CX Setup Guide](docs/guides/byova-dialogflow-cx-setup.md)** - Comprehensive Dialogflow CX integration guide
-- **[AWS Lex Setup Guide](docs/guides/byova-aws-lex-setup.md)** - AWS Lex integration guide
-
-### Development
-
-- **[Connectors Documentation](src/connectors/README.md)** - Creating custom connectors
-- **[Audio Files Guide](audio/README.md)** - Audio format and configuration
-- **[Agent Architecture](AGENTS.MD)** - AI agent guidelines for this project
-
-### API Reference
-
-- **gRPC Endpoints**: `ListVirtualAgents`, `ProcessCallerInput`
-- **HTTP Endpoints**: `/api/status`, `/api/connections`, `/health`
-
----
-
-## Project Structure
-
-```
-webex-byova-gateway-python/
-├── audio/                    # Audio files for local connector
-├── config/
-│   ├── config.yaml          # Main configuration file
-│   ├── dialogflow_cx_example.yaml
-│   └── aws_lex_example.yaml
-├── docs/                     # Documentation
-│   ├── guides/
-│   │   ├── byova-dialogflow-cx-setup.md
-│   │   └── byova-aws-lex-setup.md
-│   └── OAUTH_AUTHENTICATION.md
-├── proto/                    # Protocol Buffer definitions
-├── src/
-│   ├── connectors/           # Virtual agent connectors
-│   │   ├── dialogflow_cx_connector.py
-│   │   ├── local_audio_connector.py
-│   │   └── i_vendor_connector.py
-│   ├── core/                # Core gateway components
-│   ├── generated/           # Generated gRPC stubs
-│   ├── monitoring/          # Web monitoring interface
-│   └── utils/               # Utility modules
-├── main.py                  # Entry point
-├── requirements.txt         # Dependencies
-└── README.md
-```
-
----
-
-## Features
-
-- ✅ **Google Dialogflow CX Integration** - Full support with OAuth 2.0 and ADC
-- ✅ **AWS Lex Integration** - Amazon Lex v2 connector
-- ✅ **Local Audio Connector** - Testing with audio files
-- ✅ **gRPC Server** - BYOVA protocol implementation
-- ✅ **Web Monitoring** - Real-time dashboard
-- ✅ **Session Management** - Track active conversations
-- ✅ **Extensible Architecture** - Easy to add new connectors
+**gRPC:** `ListVirtualAgents`, `ProcessCallerInput`. **HTTP:** `/api/status`, `/api/connections`, `/health`.
 
 ---
 
 ## License
 
-[Cisco Sample Code License v1.1](LICENSE) © 2018 Cisco and/or its affiliates
+[Cisco Sample Code License v1.1](LICENSE) © 2018 Cisco and/or its affiliates.
 
-**Note**: This Sample Code is not supported by Cisco TAC and is not tested for quality or performance. This is intended for example purposes only and is provided by Cisco "AS IS" with all faults and without warranty or support of any kind.
-
----
-
-## Quick Reference
-
-### Authentication Methods
-
-| Method        | Command                                 | Use Case                     |
-| ------------- | --------------------------------------- | ---------------------------- |
-| **OAuth 2.0** | Configure in `config.yaml`              | Development, user-based auth |
-| **ADC**       | `gcloud auth application-default login` | Production, simple setup     |
-
-### Required IAM Roles
-
-```bash
-# For OAuth or ADC users
-roles/dialogflow.client
-```
-
-### OAuth Scopes
-
-```python
-# Automatically used by the gateway
-https://www.googleapis.com/auth/dialogflow
-```
-
-### Essential Commands
-
-```bash
-# Setup
-python -m venv venv
-venv\Scripts\Activate.ps1
-pip install -r requirements.txt
-
-# Generate gRPC stubs
-python -m grpc_tools.protoc -I./proto --python_out=src/generated --grpc_python_out=src/generated proto/*.proto
-
-# Start gateway
-python main.py
-
-# ADC authentication
-gcloud auth application-default login
-```
-
----
-
-**Need Help?** Check the [OAuth Authentication Guide](docs/OAUTH_AUTHENTICATION.md) or [Dialogflow CX Setup Guide](docs/guides/byova-dialogflow-cx-setup.md) for detailed instructions.
+This sample is not supported by Cisco TAC and is provided **AS IS** for example purposes only.

@@ -1,0 +1,12 @@
+# Webex token refresh: run on server start and every 11 hours.
+# Install: crontab scripts/webex_refresh.cron
+# Replace PROJECT_ROOT with your actual path (e.g. /var/app/webex-byova-gateway-python).
+
+SHELL=/bin/sh
+PROJECT_ROOT=/path/to/webex-byova-gateway-python
+
+# Run when server (cron) starts
+@reboot cd $PROJECT_ROOT && python3 scripts/refresh_webex_token.py >> logs/webex_token_refresh.log 2>&1
+
+# Run every 11 hours (00:00, 11:00, 22:00)
+0 0,11,22 * * * cd $PROJECT_ROOT && python3 scripts/refresh_webex_token.py >> logs/webex_token_refresh.log 2>&1

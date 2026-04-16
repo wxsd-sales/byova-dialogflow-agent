@@ -230,6 +230,17 @@ temp/
 *.crt
 *.p12
 
+# Webex / BYODS tokens (never commit)
+config/webex_token.json
+config/webex_access_token.txt
+webex_access_token.txt
+config/webex_oauth_secrets.json
+webex_oauth_secrets.json
+
+# Workload Identity Federation + OIDC token files
+wif-config.json
+oidc_token.json
+
 # Google Cloud & OAuth credentials (SECURITY CRITICAL)
 *.pickle
 *_token.pickle

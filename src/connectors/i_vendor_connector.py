@@ -425,8 +425,13 @@ class IVendorConnector(ABC):
             output_events=[end_event]
         )
     
-    def create_session_start_response(self, conversation_id: str, text: str = "", 
-                                    audio_content: bytes = b"") -> Dict[str, Any]:
+    def create_session_start_response(
+        self,
+        conversation_id: str,
+        text: str = "",
+        audio_content: bytes = b"",
+        language_code: Optional[str] = None,
+    ) -> Dict[str, Any]:
         """
         Create a session start response with SESSION_START event.
         
@@ -434,6 +439,7 @@ class IVendorConnector(ABC):
             conversation_id: Unique identifier for the conversation
             text: Welcome message text
             audio_content: Optional audio content
+            language_code: Optional BCP-47 tag for session transcript
             
         Returns:
             Response with session start event
@@ -444,6 +450,10 @@ class IVendorConnector(ABC):
             {"conversation_id": conversation_id}
         )
         
+        extra: Dict[str, Any] = {}
+        if language_code:
+            extra["language_code"] = language_code
+        
         return self.create_response(
             conversation_id=conversation_id,
             message_type="welcome",
@@ -451,7 +461,8 @@ class IVendorConnector(ABC):
             audio_content=audio_content,
             barge_in_enabled=True,
             response_type="silence",
-            output_events=[start_event]
+            output_events=[start_event],
+            **extra,
         )
     
     def create_start_of_input_response(self, conversation_id: str, text: str = "", 

@@ -1,9 +1,4 @@
-"""
-Google Dialogflow CX Connector implementation.
-
-This connector integrates with Google Dialogflow CX for voice virtual agent capabilities.
-It handles audio streaming, conversation management, and response processing.
-"""
+"""Google Dialogflow CX connector for the BYOVA gateway."""
 
 import logging
 import os
@@ -42,44 +37,26 @@ from .i_vendor_connector import IVendorConnector
 
 
 class DialogflowCXConnector(IVendorConnector):
-    """
-    Connector for Google Dialogflow CX virtual agents.
-    
-    This connector handles bidirectional audio streaming with Dialogflow CX,
-    managing conversations, processing audio input, and handling agent responses.
-    
-    Configuration:
-        project_id: Google Cloud project ID
-        location: Dialogflow CX location (e.g., 'us-central1', 'global')
-        agent_id: Dialogflow CX agent ID
-        
-        # Authentication Options (choose one):
-        
-        # Option 1: Service Account Key File
-        service_account_key: Path to service account JSON key file
-        
-        # Option 2: OAuth 2.0 User Credentials
-        oauth_client_id: OAuth 2.0 client ID
-        oauth_client_secret: OAuth 2.0 client secret
-        oauth_token_file: Path to store/load OAuth token (default: 'oauth_token.pickle')
-        
-        # Option 3: Application Default Credentials (ADC)
-        # Don't specify any auth parameters - will use ADC automatically
-        
-        # Other settings:
-        language_code: Language code (default: 'en-US')
-        sample_rate_hertz: Audio sample rate (default: 8000)
-        audio_encoding: Audio encoding format (default: 'AUDIO_ENCODING_MULAW')
-        agents: List of agent display names
+    """Dialogflow CX connector. Auth: WIF (GOOGLE_APPLICATION_CREDENTIALS), access token,
+    service account key, OAuth (oauth_client_id/secret + token file), or ADC.
+    See config keys: project_id, location, agent_id, api_endpoint, force_input_format, barge_in_enabled.
     """
 
+    @staticmethod
+    def _dialogflow_cx_api_endpoint(location: str, explicit: Optional[str]) -> Optional[str]:
+        """
+        Regional Dialogflow CX API host. None = client default (global endpoint).
+
+        See: https://cloud.google.com/dialogflow/cx/docs/concept/region
+        """
+        if explicit is not None and str(explicit).strip():
+            return str(explicit).strip()
+        loc = (location or "global").strip().lower()
+        if loc == "global":
+            return None
+        return f"{loc}-dialogflow.googleapis.com"
+
     def __init__(self, config: Dict[str, Any]):
-        """
-        Initialize the Dialogflow CX connector.
-        
-        Args:
-            config: Configuration dictionary containing Dialogflow CX settings
-        """
         if not DIALOGFLOW_AVAILABLE:
             raise ImportError(
                 "google-cloud-dialogflow-cx package not installed. "
@@ -89,7 +66,6 @@ class DialogflowCXConnector(IVendorConnector):
         self.logger = logging.getLogger(__name__)
         self.config = config
         
-        # Required configuration
         self.project_id = config.get("project_id")
         self.location = config.get("location", "global")
         self.agent_id = config.get("agent_id")
@@ -99,43 +75,72 @@ class DialogflowCXConnector(IVendorConnector):
                 "Missing required configuration: project_id and agent_id are required"
             )
         
-        # Optional configuration
         self.language_code = config.get("language_code", "en-US")
         self.sample_rate_hertz = config.get("sample_rate_hertz", 8000)
         self.audio_encoding = config.get("audio_encoding", "AUDIO_ENCODING_MULAW")
         self.agents = config.get("agents", ["Dialogflow CX Agent OAuth"])
-        
-        # Force specific input format (bypasses auto-detection)
-        # Set to "wxcc" for WxCC calls (8kHz MULAW), "test" for test files, or leave empty for auto
+
+        self.barge_in_enabled = bool(config.get("barge_in_enabled", True))
         self.force_input_format = config.get("force_input_format", "").lower()
-        
-        # Audio accumulation settings for better utterance capture
-        self.min_audio_seconds = config.get("min_audio_seconds", 2.5)  # Wait at least 2.5s
-        self.max_audio_seconds = config.get("max_audio_seconds", 5.0)  # Force process at 5s
-        
-        # Authentication configuration
-        access_token = config.get("access_token")
+        self.min_audio_seconds = config.get("min_audio_seconds", 2.5)
+        self.max_audio_seconds = config.get("max_audio_seconds", 5.0)
+
+        access_token = config.get("access_token") or os.environ.get("GCP_ACCESS_TOKEN")
+        oidc_token = config.get("oidc_token") or os.environ.get("GCP_OIDC_TOKEN")
+        wif_config_path = config.get("wif_config_path") or os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
         service_account_key_path = config.get("service_account_key")
         oauth_client_id = config.get("oauth_client_id")
         oauth_client_secret = config.get("oauth_client_secret")
         oauth_token_file = config.get("oauth_token_file", "oauth_token.pickle")
         
-        # Initialize credentials based on authentication method
+        if access_token:
+            token_source = "config file" if config.get("access_token") else "GCP_ACCESS_TOKEN env var"
+            masked_token = f"{access_token[:10]}...{access_token[-5:]}" if len(access_token) > 15 else "***"
+            self.logger.info(f"Access token found from {token_source}: {masked_token}")
+        if oidc_token:
+            token_source = "config file" if config.get("oidc_token") else "GCP_OIDC_TOKEN env var"
+            masked_token = f"{oidc_token[:10]}...{oidc_token[-5:]}" if len(oidc_token) > 15 else "***"
+            self.logger.info(f"OIDC token found from {token_source}: {masked_token}")
+        
         self.credentials = None
         auth_method = None
+
+        if wif_config_path and os.path.exists(wif_config_path):
+            self.logger.info(f"Using Workload Identity Federation from: {wif_config_path}")
+            try:
+                import google.auth
+                from google.auth.transport.requests import Request
+                
+                os.environ['GOOGLE_APPLICATION_CREDENTIALS'] = wif_config_path
+                os.environ['GOOGLE_CLOUD_PROJECT'] = self.project_id
+
+                self.credentials, project = google.auth.default(
+                    scopes=['https://www.googleapis.com/auth/cloud-platform']
+                )
+                
+                if not self.credentials.valid:
+                    self.logger.info("Refreshing WIF credentials...")
+                    self.credentials.refresh(Request())
+                
+                auth_method = f"Workload Identity Federation (WIF)"
+                self.logger.info(f"WIF authentication successful!")
+                self.logger.info(f"Project: {project}")
+                self.logger.info(f"Token valid: {self.credentials.valid}")
+                
+            except Exception as e:
+                self.logger.error(f"Failed to authenticate with WIF: {e}")
+                self.logger.error(f"WIF config: {wif_config_path}")
+                self.logger.error(f"Make sure oidc_token.json exists and contains valid JWT")
+                raise
         
-        # Option 1: Direct Access Token (no auto-refresh)
-        # Reference: https://google-auth.readthedocs.io/en/master/reference/google.oauth2.credentials.html
-        # WARNING: Access tokens expire in ~1 hour and will NOT be refreshed
-        if access_token:
+        elif access_token:
             from google.oauth2.credentials import Credentials
-            self.credentials = Credentials(token=access_token)
+            self.credentials = Credentials(token=access_token, quota_project_id=self.project_id)
             auth_method = "Direct Access Token (expires in ~1 hour, no auto-refresh)"
             self.logger.info("Using direct access token")
+            self.logger.info(f"Quota project set to: {self.project_id}")
             self.logger.warning("⚠️  Access token will expire in ~1 hour without refresh!")
             
-        # Option 2: Service Account Key File
-        # Reference: https://google-auth.readthedocs.io/en/master/reference/google.oauth2.service_account.html
         elif service_account_key_path and os.path.exists(service_account_key_path):
             self.credentials = service_account.Credentials.from_service_account_file(
                 service_account_key_path
@@ -143,8 +148,6 @@ class DialogflowCXConnector(IVendorConnector):
             auth_method = f"Service Account Key: {service_account_key_path}"
             self.logger.info(f"Loaded service account from {service_account_key_path}")
             
-        # Option 3: OAuth 2.0 User Credentials (with auto-refresh)
-        # Reference: https://developers.google.com/identity/protocols/oauth2
         elif oauth_client_id and oauth_client_secret:
             self.credentials = self._get_oauth_credentials(
                 oauth_client_id, 
@@ -154,40 +157,50 @@ class DialogflowCXConnector(IVendorConnector):
             auth_method = f"OAuth 2.0: {oauth_token_file}"
             self.logger.info(f"Using OAuth 2.0 credentials from {oauth_token_file}")
             
-        # Option 4: Application Default Credentials (ADC)
-        # Reference: https://cloud.google.com/docs/authentication/application-default-credentials
         else:
             auth_method = "Application Default Credentials (ADC)"
             self.logger.info("Using Application Default Credentials (ADC)")
         
-        # Initialize Dialogflow CX clients
         try:
+            from google.api_core import client_options as client_options_lib
+
+            cx_api_endpoint = self._dialogflow_cx_api_endpoint(
+                self.location, config.get("api_endpoint")
+            )
+            opts_kwargs: Dict[str, Any] = {"quota_project_id": self.project_id}
+            if cx_api_endpoint:
+                opts_kwargs["api_endpoint"] = cx_api_endpoint
+            client_opts = client_options_lib.ClientOptions(**opts_kwargs)
+
+            self.logger.info(
+                "Dialogflow CX API endpoint: %s",
+                cx_api_endpoint or "dialogflow.googleapis.com (default for location=global)",
+            )
+
             if self.credentials:
-                self.sessions_client = dialogflow.SessionsClient(credentials=self.credentials)
+                self.sessions_client = dialogflow.SessionsClient(
+                    credentials=self.credentials,
+                    client_options=client_opts
+                )
             else:
-                self.sessions_client = dialogflow.SessionsClient()
+                self.sessions_client = dialogflow.SessionsClient(
+                    client_options=client_opts
+                )
             
             self.logger.info(f"Dialogflow CX SessionsClient initialized successfully using {auth_method}")
+            self.logger.info(f"Quota project configured: {self.project_id}")
         except Exception as e:
             self.logger.error(f"Failed to initialize Dialogflow CX client: {e}")
             raise
         
-        # Active sessions tracking
         self.active_sessions: Dict[str, Dict[str, Any]] = {}
         self.sessions_lock = threading.Lock()
         
-        # Streaming sessions for audio
         self.streaming_sessions: Dict[str, Any] = {}
         self.audio_queues: Dict[str, list] = {}
         
-        # Auto-detect audio format from WxCC (8kHz MULAW) vs test files (16kHz LINEAR_16)
-        # Store detected format per conversation: {'conversation_id': ('sample_rate', 'encoding')}
         self.detected_formats: Dict[str, Tuple[int, str]] = {}
-        
-        # Agent path
         self.agent_path = f"projects/{self.project_id}/locations/{self.location}/agents/{self.agent_id}"
-        
-        # Log audio conversion capability
         audio_lib = "audioop (native)" if AUDIOOP_AVAILABLE else "fallback (Python 3.13+)"
         
         self.logger.info(
@@ -198,33 +211,7 @@ class DialogflowCXConnector(IVendorConnector):
         )
 
     def _get_oauth_credentials(self, client_id: str, client_secret: str, token_file: str) -> OAuth2Credentials:
-        """
-        Get OAuth 2.0 credentials for Dialogflow CX.
-        
-        This method handles the OAuth 2.0 flow for user authentication:
-        - If a token file exists and is valid, it loads the credentials
-        - If the token is expired, it refreshes the credentials
-        - If no token exists, it initiates the OAuth flow (opens browser)
-        
-        Args:
-            client_id: OAuth 2.0 client ID
-            client_secret: OAuth 2.0 client secret
-            token_file: Path to save/load the OAuth token
-            
-        Returns:
-            OAuth2Credentials object
-            
-        Raises:
-            Exception: If OAuth flow fails or credentials cannot be obtained
-        """
-        # OAuth 2.0 Scopes for Dialogflow CX
-        # Reference: https://developers.google.com/identity/protocols/oauth2/scopes#dialogflow
-        #
-        # Available scopes:
-        # - 'https://www.googleapis.com/auth/dialogflow' (Recommended - Dialogflow access only)
-        # - 'https://www.googleapis.com/auth/cloud-platform' (Full GCP access - use only if needed)
-        #
-        # Using dialogflow scope for principle of least privilege
+        """Load, refresh, or obtain OAuth2 user credentials (browser flow if needed)."""
         SCOPES = ['https://www.googleapis.com/auth/dialogflow']
         
         creds = None
@@ -261,7 +248,7 @@ class DialogflowCXConnector(IVendorConnector):
                         "auth_uri": "https://accounts.google.com/o/oauth2/auth",
                         "token_uri": "https://oauth2.googleapis.com/token",
                         "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
-                        "redirect_uris": ["https://2a438bf36925.ngrok-free.app"]
+                        "redirect_uris": ["http://localhost:8090/"]
                     }
                 }
                 
@@ -380,14 +367,21 @@ class DialogflowCXConnector(IVendorConnector):
             return self.create_session_start_response(
                 conversation_id=conversation_id,
                 text=response_text,
-                audio_content=audio_content
+                audio_content=audio_content,
+                language_code=self.language_code,
             )
             
         except Exception as e:
             self.logger.error(f"Error starting conversation {conversation_id}: {e}", exc_info=True)
-            return self.create_error_response(
+            # Return error response using create_response
+            return self.create_response(
                 conversation_id=conversation_id,
-                error_message=f"Failed to start conversation: {str(e)}"
+                message_type="error",
+                text=f"Failed to start conversation: {str(e)}",
+                audio_content=b"",
+                barge_in_enabled=False,
+                response_type="final",
+                language_code=self.language_code,
             )
 
     def send_message(self, conversation_id: str, message_data: Dict[str, Any]) -> Generator[Dict[str, Any], None, None]:
@@ -443,16 +437,24 @@ class DialogflowCXConnector(IVendorConnector):
                 yield from self._handle_event_input(conversation_id, session_info, message_data)
             else:
                 self.logger.warning(f"[{conversation_id}] Unknown message type: {message_type}")
-                yield self.create_error_response(
+                yield self.create_response(
                     conversation_id=conversation_id,
-                    error_message=f"Unknown message type: {message_type}"
+                    message_type="error",
+                    text=f"Unknown message type: {message_type}",
+                    audio_content=b"",
+                    barge_in_enabled=False,
+                    response_type="final"
                 )
                 
         except Exception as e:
             self.logger.error(f"Error processing message for {conversation_id}: {e}", exc_info=True)
-            yield self.create_error_response(
+            yield self.create_response(
                 conversation_id=conversation_id,
-                error_message=f"Error processing message: {str(e)}"
+                message_type="error",
+                text=f"Error processing message: {str(e)}",
+                audio_content=b"",
+                barge_in_enabled=False,
+                response_type="final"
             )
 
     def _handle_audio_input(
@@ -635,19 +637,25 @@ class DialogflowCXConnector(IVendorConnector):
                     f"[{conversation_id}] [INTENT] {intent_name} (confidence: {confidence:.2%})"
                 )
             
-            # Process response messages
+            # Process response messages (first text chunk carries user_transcript for session_transcript)
+            first_text_response = True
             for message in response.query_result.response_messages:
                 if message.text:
                     text_content = " ".join(message.text.text)
                     self.logger.info(
                         f"[{conversation_id}] [AGENT] Response: '{text_content}'"
                     )
-                    
+                    extra: Dict[str, Any] = {"language_code": self.language_code}
+                    if first_text_response:
+                        extra["user_transcript"] = transcript
+                        first_text_response = False
                     yield self.create_response(
                         conversation_id=conversation_id,
                         message_type="agent_response",
                         text=text_content,
-                        response_type="final"
+                        barge_in_enabled=self.barge_in_enabled,
+                        response_type="final",
+                        **extra,
                     )
             
             # Handle output audio (agent's synthesized speech)
@@ -660,6 +668,7 @@ class DialogflowCXConnector(IVendorConnector):
                     conversation_id=conversation_id,
                     message_type="audio",
                     audio_content=response.output_audio,  # Fixed: was 'audio=', should be 'audio_content='
+                    barge_in_enabled=self.barge_in_enabled,
                     response_type="final"
                 )
             else:
@@ -738,16 +747,23 @@ class DialogflowCXConnector(IVendorConnector):
             
             response = self.sessions_client.detect_intent(request=request)
             
-            # Process text response
+            # Process text response (user's typed/DTMF text on first agent reply for transcript)
+            first_text_response = True
             for message in response.query_result.response_messages:
                 if message.text:
                     text_content = " ".join(message.text.text)
                     self.logger.info(f"[{conversation_id}] [AGENT] Text response: '{text_content}'")
+                    extra: Dict[str, Any] = {"language_code": self.language_code}
+                    if first_text_response:
+                        extra["user_transcript"] = text
+                        first_text_response = False
                     yield self.create_response(
                         conversation_id=conversation_id,
                         message_type="agent_response",
                         text=text_content,
-                        response_type="final"
+                        barge_in_enabled=self.barge_in_enabled,
+                        response_type="final",
+                        **extra,
                     )
             
             # Process audio response
@@ -760,14 +776,19 @@ class DialogflowCXConnector(IVendorConnector):
                     conversation_id=conversation_id,
                     message_type="audio",
                     audio_content=response.output_audio,  # Fixed: was 'audio=', should be 'audio_content='
+                    barge_in_enabled=self.barge_in_enabled,
                     response_type="final"
                 )
                     
         except Exception as e:
             self.logger.error(f"Error handling text input: {e}", exc_info=True)
-            yield self.create_error_response(
+            yield self.create_response(
                 conversation_id=conversation_id,
-                error_message=f"Error handling text: {str(e)}"
+                message_type="error",
+                text=f"Error handling text: {str(e)}",
+                audio_content=b"",
+                barge_in_enabled=False,
+                response_type="final"
             )
 
     def _handle_event_input(
@@ -821,9 +842,13 @@ class DialogflowCXConnector(IVendorConnector):
                     
         except Exception as e:
             self.logger.error(f"Error handling event input: {e}", exc_info=True)
-            yield self.create_error_response(
+            yield self.create_response(
                 conversation_id=conversation_id,
-                error_message=f"Error handling event: {str(e)}"
+                message_type="error",
+                text=f"Error handling event: {str(e)}",
+                audio_content=b"",
+                barge_in_enabled=False,
+                response_type="final"
             )
 
     def _get_audio_encoding(self):

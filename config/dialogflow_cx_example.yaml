@@ -115,8 +115,8 @@ dialogflow_cx_oauth:
     audio_encoding: "AUDIO_ENCODING_MULAW"
 
     # OAuth 2.0 credentials (user authentication)
-    oauth_client_id: "id"
-    oauth_client_secret: "secret"
+    oauth_client_id: "YOUR_CLIENT_ID.apps.googleusercontent.com"
+    oauth_client_secret: "YOUR_OAUTH_CLIENT_SECRET"
     oauth_token_file: "dialogflow_oauth_token.pickle"
 
     agents:
