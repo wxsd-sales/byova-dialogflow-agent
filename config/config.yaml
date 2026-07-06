@@ -26,6 +26,34 @@ connectors:
       agents:
         - "Dialogflow CX Agent"
 
+  # Google CX Agent Studio (GECX / CES BidiRunSession)
+  # gecx_connector:
+  #   type: "gecx_connector"
+  #   class: "GECXConnector"
+  #   module: "connectors.gecx_connector"
+  #   config:
+  #     project_id: "YOUR_PROJECT_ID"
+  #     location: "us"
+  #     application_id: "YOUR_APP_ID"
+  #     # deployment_id is OPTIONAL; omit to use the app's root/draft agent.
+  #     # deployment_id: "YOUR_DEPLOYMENT_ID"
+  #     # api_endpoint defaults to ces.<location>.rep.googleapis.com (regional
+  #     # runtime endpoint that serves BidiRunSession); override only if needed.
+  #     language_code: "en-US"
+  #     input_sample_rate_hertz: 8000
+  #     input_audio_encoding: "MULAW"
+  #     output_sample_rate_hertz: 8000
+  #     output_audio_encoding: "MULAW"
+  #     initial_message: "Hello"
+  #     enable_partial_responses: true
+  #     force_input_format: "wxcc"
+  #     # Omit auth to use Application Default Credentials (recommended on GCP;
+  #     # runtime service account needs role roles/ces.client).
+  #     # service_account_key: "/path/to/service-account.json"
+  #     agents:
+  #       - "My GECX Agent"
+
+# Monitoring interface
 monitoring:
   enabled: true
   host: "0.0.0.0"

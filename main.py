@@ -7,6 +7,7 @@ creates the gRPC server, and starts listening for requests.
 """
 
 import logging
+import os
 import sys
 import threading
 from concurrent import futures
@@ -238,8 +239,9 @@ def main():
     logger = None
     server = None
     try:
-        # Load configuration
-        config_path = "config/config.yaml"
+        # Load configuration (GATEWAY_CONFIG env var overrides default; used for
+        # per-environment configs such as Cloud Run deployments)
+        config_path = os.environ.get("GATEWAY_CONFIG", "config/config.yaml")
         config = load_config(config_path)
 
         # Set up logging
@@ -264,7 +266,9 @@ def main():
         # Get server configuration
         gateway_config = config.get("gateway", {})
         host = gateway_config.get("host", "0.0.0.0")
-        port = gateway_config.get("port", 50052)
+        # Cloud Run (and similar platforms) inject the listen port via $PORT.
+        # Prefer it so the gRPC server binds where the platform expects.
+        port = int(os.environ.get("PORT", gateway_config.get("port", 50052)))
         tls_config = gateway_config.get("tls") or {}
         tls_enabled = bool(tls_config.get("enabled", False))
         project_root = Path(__file__).resolve().parent

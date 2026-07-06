@@ -32,6 +32,7 @@ six>=1.17.0
 
 # Google Cloud Dialogflow CX
 google-cloud-dialogflow-cx>=1.33.0
+google-cloud-ces>=0.7.0
 google-api-core>=2.19.0
 google-auth>=2.29.0
 google-auth-oauthlib>=1.2.0  # For OAuth 2.0 authentication

@@ -65,9 +65,32 @@ connectors:
       oauth_client_id: "<CLIENT_ID>"
       oauth_client_secret: "<CLIENT_SECRET>"
       oauth_token_file: "dialogflow_oauth_token.pickle"
+      agents:
+        - "OAuth Authenticated Agent"
 
-    agents:
-      - "OAuth Authenticated Agent"
+  # Google CX Agent Studio (GECX / CES BidiRunSession)
+  gecx_connector:
+    type: "gecx_connector"
+    class: "GECXConnector"
+    module: "connectors.gecx_connector"
+    config:
+      project_id: "<PROJECT_ID>"
+      location: "us"
+      application_id: "<APPLICATION_ID>"
+      # deployment_id is optional; omit to use the app's root/draft agent.
+      # deployment_id: "<DEPLOYMENT_ID>"
+      # api_endpoint defaults to ces.<location>.rep.googleapis.com.
+      language_code: "en-US"
+      input_sample_rate_hertz: 8000
+      input_audio_encoding: "MULAW"
+      output_sample_rate_hertz: 8000
+      output_audio_encoding: "MULAW"
+      initial_message: "Hello"
+      enable_partial_responses: true
+      force_input_format: "wxcc"
+      # service_account_key: "/path/to/service-account.json"
+      agents:
+        - "My GECX Agent"
 
 # Monitoring interface
 monitoring:

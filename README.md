@@ -237,6 +237,7 @@ Stop with **Ctrl+C**.
 | Topic | Location |
 |-------|----------|
 | Dialogflow CX setup (longer walkthrough) | [docs/guides/byova-dialogflow-cx-setup.md](docs/guides/byova-dialogflow-cx-setup.md) |
+| GECX / CX Agent Studio setup (streaming + Cloud Run) | [docs/guides/byova-gecx-setup.md](docs/guides/byova-gecx-setup.md) |
 | AWS Lex setup | [docs/guides/byova-aws-lex-setup.md](docs/guides/byova-aws-lex-setup.md) |
 | Custom connectors | [src/connectors/README.md](src/connectors/README.md) |
 | AI/agent notes for this repo | [AGENTS.MD](AGENTS.MD) |

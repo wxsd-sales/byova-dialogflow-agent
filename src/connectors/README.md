@@ -144,6 +144,50 @@ The connector supports multiple ways to provide AWS credentials:
 - Full conversation handling not yet implemented
 - Audio processing integration pending
 
+### Google Dialogflow CX Connector (`dialogflow_cx_connector.py`)
+
+**Purpose**: Integration with legacy Google Dialogflow CX agents via `detect_intent` (batched audio).
+
+See [`docs/guides/byova-dialogflow-cx-setup.md`](../../docs/guides/byova-dialogflow-cx-setup.md).
+
+### GECX / CX Agent Studio Connector (`gecx_connector.py`)
+
+**Purpose**: Integration with **CX Agent Studio** (Gemini Enterprise for CX) via the CES **BidiRunSession** API for real-time bidirectional voice.
+
+**Features**:
+- Streams WxCC caller audio to Google as it arrives (no 2.5s batching)
+- Maps CES `session_output` text and audio back to WxCC
+- Supports partial agent responses when `enable_partial_responses: true`
+- Handles barge-in (`interruption_signal`) and session end events
+- Reuses WxCC 8 kHz MULAW telephony format
+
+**Prerequisites**:
+1. CX Agent Studio agent with an **API Access** deployment channel
+2. GCP service account with `roles/ces.client` or ADC
+3. Python package: `google-cloud-ces`
+
+**Configuration**:
+```yaml
+gecx_connector:
+  type: "gecx_connector"
+  class: "GECXConnector"
+  module: "connectors.gecx_connector"
+  config:
+    project_id: "YOUR_PROJECT_ID"
+    location: "us"
+    application_id: "YOUR_APPLICATION_ID"
+    deployment_id: "YOUR_DEPLOYMENT_ID"
+    input_sample_rate_hertz: 8000
+    input_audio_encoding: "MULAW"
+    output_sample_rate_hertz: 8000
+    output_audio_encoding: "MULAW"
+    service_account_key: "/path/to/ces-key.json"
+    agents:
+      - "My GECX Agent"
+```
+
+See [`docs/guides/byova-gecx-setup.md`](../../docs/guides/byova-gecx-setup.md) and [`config/gecx_example.yaml`](../../config/gecx_example.yaml).
+
 ## Adding New Connectors
 
 ### 1. Create Connector Class
