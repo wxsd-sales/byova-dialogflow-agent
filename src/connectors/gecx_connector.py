@@ -305,14 +305,36 @@ class GECXStreamingSession:
             if output.end_session:
                 self._flush_audio_buffer()
                 self._emit_session_end(conversation_id, output)
+                self._begin_half_close()
 
         if message.end_session:
             self._flush_audio_buffer()
             self._emit_session_end(conversation_id, message.end_session)
+            self._begin_half_close()
 
         if message.go_away:
             self.logger.warning(f"[{conversation_id}] [GECX] GoAway received, stopping stream")
             self._stop_event.set()
+
+    def _begin_half_close(self) -> None:
+        """Half-close the client side of the bidi stream after CES ends a session.
+
+        CES requires the client to stop sending (half-close) within 30s of an
+        ``EndSession`` message; otherwise it aborts the RPC with
+        ``CLIENT_HALF_CLOSE_TIMEOUT``, which surfaces as a stream error and
+        tears the turn down before the transfer/session-end response is
+        delivered to WxCC. Signalling the request generator to return
+        half-closes the stream cleanly so the RPC completes normally.
+        """
+        if self._stop_event.is_set():
+            return
+        self.logger.info(
+            f"[{self.conversation_id}] [GECX] EndSession received; half-closing stream"
+        )
+        self._stop_event.set()
+        # Unblock the request generator immediately so it returns (rather than
+        # waiting for its queue poll to time out).
+        self.inbound_queue.put(_STREAM_STOP)
 
     def _flush_audio_buffer(self, response_type: str = "final") -> bool:
         """Wrap buffered CES audio in a WxCC WAV clip and enqueue it.

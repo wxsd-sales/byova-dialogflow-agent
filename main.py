@@ -20,6 +20,9 @@ import yaml
 sys.path.insert(0, str(Path(__file__).parent / "src"))
 sys.path.insert(0, str(Path(__file__).parent / "src" / "core"))
 
+from grpc_health.v1 import health_pb2_grpc
+
+from core.health_service import HealthCheckService
 from core.virtual_agent_router import VirtualAgentRouter
 from core.wxcc_gateway_server import WxCCGatewayServer
 from monitoring.app import run_web_app
@@ -287,6 +290,13 @@ def main():
         add_VoiceVirtualAgentServicer_to_server(
             server, grpc_server
         )
+
+        # Register the standard gRPC health service. Webex Contact Center /
+        # BYODS health-checks the datasource via grpc.health.v1.Health/Check;
+        # without a SERVING response, calls are not routed to the gateway.
+        health_service = HealthCheckService(router)
+        health_pb2_grpc.add_HealthServicer_to_server(health_service, grpc_server)
+        logger.info("Health service registered with gRPC server")
 
         # Bind gRPC: TLS (grpcs) or plaintext (grpc)
         if tls_enabled:

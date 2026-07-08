@@ -201,6 +201,30 @@ class TestServerMessageMapping:
         responses = self._end_session(connector, {"reason": "user said goodbye"})
         assert responses[0]["message_type"] == "session_end"
 
+    def test_end_session_half_closes_stream(self, connector):
+        """CES aborts with CLIENT_HALF_CLOSE_TIMEOUT unless we stop sending
+        after an EndSession; the session must signal the request generator to
+        return (stop event set + STREAM_STOP sentinel enqueued)."""
+        from src.connectors import gecx_connector as gecx_mod
+
+        session = GECXStreamingSession(
+            connector=connector,
+            conversation_id="conv-1",
+            session_path="projects/p/locations/us/apps/a/sessions/s1",
+            deployment_path=connector.deployment_path,
+        )
+        message = SimpleNamespace(
+            recognition_result=None,
+            interruption_signal=None,
+            session_output=None,
+            go_away=None,
+            end_session=SimpleNamespace(metadata={"transfer": True}),
+        )
+        assert not session._stop_event.is_set()
+        session._handle_server_message(message)
+        assert session._stop_event.is_set()
+        assert session.inbound_queue.get_nowait() is gecx_mod._STREAM_STOP
+
 
 class TestAudioFormat:
     def test_resolve_input_format_from_gateway_metadata(self, connector):
