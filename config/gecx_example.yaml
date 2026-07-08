@@ -39,6 +39,26 @@ gecx_connector:
     enable_partial_responses: true
     force_input_format: "wxcc"
 
+    # --- Escalation / human handoff -------------------------------------
+    # CES signals escalation as an EndSession carrying a metadata Struct. The
+    # connector logs that metadata ("EndSession metadata: {...}") so you can see
+    # exactly what your agent emits. If any of these metadata keys is truthy, the
+    # call is transferred to a human (WxCC TRANSFER_TO_AGENT). Defaults below --
+    # override to match what your CX Agent Studio agent actually sends.
+    # transfer_metadata_keys:
+    #   - "transfer"
+    #   - "transfer_to_agent"
+    #   - "transfer_to_human"
+    #   - "escalate"
+    #   - "escalation"
+    #   - "handoff"
+    #   - "human_handoff"
+    #   - "live_agent_handoff"
+    # A transfer is also triggered if a reason/type-style metadata value contains
+    # one of these substrings:
+    # transfer_reason_keywords: ["transfer", "escalat", "human", "live agent", "live_agent", "handoff"]
+    # transfer_reason_metadata_keys: ["reason", "end_reason", "type", "status", "intent", "action"]
+
     # Authentication (choose one). If NONE are set, Application Default
     # Credentials are used -- recommended on Google Cloud (Cloud Run/GKE/GCE),
     # where the runtime service account needs role roles/ces.client

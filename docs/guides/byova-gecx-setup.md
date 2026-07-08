@@ -240,6 +240,66 @@ WxCC sends 8 kHz mu-law. `main.py` forwards WxCC's encoding + sample rate as
 metadata; the connector normalizes/converts to the CES `InputAudioConfig` format
 (`force_input_format: "wxcc"` pins detection to 8 kHz MULAW).
 
+## Escalation to a human agent
+
+There is **no separate "transfer to live agent" streaming message** in the CES
+API. When a CX Agent Studio agent escalates, CES sends an **`EndSession`**
+message — the same signal used for a normal "goodbye" — carrying a `metadata`
+Struct. The metadata is the only thing that distinguishes an escalation from a
+normal end.
+
+Flow:
+
+```
+Agent escalates ─► CES EndSession { metadata: {...} }
+                 ─► GECXConnector inspects metadata
+                     ├─ looks like a transfer ─► TRANSFER_TO_AGENT ─► WxCC routes to a human queue
+                     └─ otherwise             ─► SESSION_END (call ends)
+```
+
+### 1. Configure the agent to escalate (GECX side)
+
+1. In your agent's instructions/playbook, define **when** to hand off (e.g.
+   "if the caller asks for a human, or after two failed attempts, escalate").
+2. Make that escalation **end the session and attach metadata** that flags a
+   transfer. The connector recognizes, by default, any of these truthy metadata
+   keys: `transfer`, `transfer_to_agent`, `transfer_to_human`, `escalate`,
+   `escalation`, `handoff`, `human_handoff`, `live_agent_handoff` — and also a
+   `reason`/`type`/`status`/`intent`/`action` value containing `transfer`,
+   `escalat`, `human`, `live agent`, or `handoff`. Optionally include a
+   `reason` string.
+
+### 2. Discover exactly what your agent sends
+
+The connector logs the raw metadata on every session end:
+
+```
+[<conv>] [GECX] EndSession metadata: {'reason': 'agent_requested_handoff', ...}
+```
+
+Trigger one escalation, read that log line, and confirm your keys match. If they
+differ, either adjust the agent or override the detection in config (below) —
+no code change needed:
+
+```yaml
+    # Match whatever your agent actually emits
+    transfer_metadata_keys: ["handoff", "route_to_agent"]
+    transfer_reason_keywords: ["transfer", "escalat", "human", "handoff"]
+    transfer_reason_metadata_keys: ["reason", "type", "action"]
+```
+
+When detected, you'll see:
+
+```
+[<conv>] [GECX] Escalation detected -> TRANSFER_TO_AGENT (reason: ...)
+```
+
+### 3. Handle it in the WxCC flow
+
+The Virtual Agent element emits a **Transfer** branch on `TRANSFER_TO_AGENT`.
+Wire that branch to a queue that routes to human agents. (A normal
+`SESSION_END` ends the virtual-agent interaction without a transfer.)
+
 ## Configuration reference
 
 | Key | Required | Description |
@@ -255,6 +315,9 @@ metadata; the connector normalizes/converts to the CES `InputAudioConfig` format
 | `initial_message` | No | Text sent when the CES stream opens (default: `Hello`) |
 | `enable_partial_responses` | No | Map CES partial outputs to WxCC `PARTIAL` responses |
 | `force_input_format` | No | `wxcc` forces 8 kHz MULAW input detection |
+| `transfer_metadata_keys` | No | EndSession metadata keys that, when truthy, trigger a human transfer (see [Escalation](#escalation-to-a-human-agent)) |
+| `transfer_reason_keywords` | No | Substrings that, if found in a reason/type metadata value, trigger a transfer |
+| `transfer_reason_metadata_keys` | No | Which metadata keys are scanned for `transfer_reason_keywords` |
 
 ## Authentication options
 

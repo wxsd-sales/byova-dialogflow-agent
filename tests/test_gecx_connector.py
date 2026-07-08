@@ -134,7 +134,9 @@ class TestServerMessageMapping:
         assert responses[0]["text"] == "Hi there"
         assert responses[0]["response_type"] == "final"
         assert responses[1]["message_type"] == "audio"
-        assert responses[1]["audio_content"] == b"\x01\x02"
+        # Audio is buffered per turn and wrapped in a WxCC WAV container.
+        assert responses[1]["audio_content"].startswith(b"RIFF")
+        assert responses[1]["audio_content"].endswith(b"\x01\x02")
 
     def test_end_session_emits_session_end_event(self, connector):
         session = GECXStreamingSession(
@@ -157,6 +159,47 @@ class TestServerMessageMapping:
 
         assert responses[0]["message_type"] == "session_end"
         assert responses[0]["output_events"][0]["event_type"] == "SESSION_END"
+
+    def _end_session(self, connector, metadata):
+        session = GECXStreamingSession(
+            connector=connector,
+            conversation_id="conv-1",
+            session_path="projects/p/locations/us/apps/a/sessions/s1",
+            deployment_path=connector.deployment_path,
+        )
+        message = SimpleNamespace(
+            recognition_result=None,
+            interruption_signal=None,
+            session_output=None,
+            go_away=None,
+            end_session=SimpleNamespace(metadata=metadata),
+        )
+        session._handle_server_message(message)
+        return session.drain_responses()
+
+    def test_end_session_with_transfer_flag_emits_transfer(self, connector):
+        responses = self._end_session(
+            connector, {"transfer": True, "reason": "caller asked for a human"}
+        )
+        assert responses[0]["message_type"] == "transfer"
+        assert responses[0]["output_events"][0]["event_type"] == "TRANSFER_TO_HUMAN"
+        assert responses[0]["output_events"][0]["metadata"]["reason"] == (
+            "caller asked for a human"
+        )
+
+    def test_end_session_with_reason_keyword_emits_transfer(self, connector):
+        responses = self._end_session(
+            connector, {"reason": "agent_requested_handoff"}
+        )
+        assert responses[0]["message_type"] == "transfer"
+
+    def test_end_session_with_string_flag_emits_transfer(self, connector):
+        responses = self._end_session(connector, {"escalate": "true"})
+        assert responses[0]["message_type"] == "transfer"
+
+    def test_end_session_normal_completion_is_not_transfer(self, connector):
+        responses = self._end_session(connector, {"reason": "user said goodbye"})
+        assert responses[0]["message_type"] == "session_end"
 
 
 class TestAudioFormat:

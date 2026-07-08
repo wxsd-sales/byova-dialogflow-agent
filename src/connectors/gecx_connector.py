@@ -344,21 +344,76 @@ class GECXStreamingSession:
         )
         return True
 
-    def _emit_session_end(self, conversation_id: str, end_obj: Any) -> None:
-        metadata = {}
-        if hasattr(end_obj, "metadata") and end_obj.metadata:
-            try:
-                metadata = dict(end_obj.metadata)
-            except (TypeError, ValueError):
-                metadata = {}
+    @staticmethod
+    def _metadata_to_dict(end_obj: Any) -> Dict[str, Any]:
+        """Best-effort conversion of an EndSession.metadata Struct to a dict."""
+        raw = getattr(end_obj, "metadata", None)
+        if not raw:
+            return {}
+        # proto-plus Struct fields expose .to_dict() / dict-like access.
+        for accessor in ("to_dict",):
+            fn = getattr(raw, accessor, None)
+            if callable(fn):
+                try:
+                    return dict(fn())
+                except (TypeError, ValueError):
+                    pass
+        try:
+            return dict(raw)
+        except (TypeError, ValueError):
+            return {}
 
-        transfer_requested = metadata.get("transfer", metadata.get("transfer_to_agent"))
-        if transfer_requested in (True, "true", "True", "1"):
+    def _detect_transfer(self, metadata: Dict[str, Any]) -> Tuple[bool, str]:
+        """Decide whether an EndSession represents a human handoff.
+
+        Returns (is_transfer, reason). Detection is driven by the connector's
+        configurable ``transfer_metadata_keys`` / ``transfer_reason_keywords``.
+        """
+        truthy = {"true", "1", "yes", "y", "on"}
+        lowered = {str(k).lower(): v for k, v in metadata.items()}
+
+        # 1) Explicit boolean-ish flag keys.
+        for key in self.connector.transfer_metadata_keys:
+            if key not in lowered:
+                continue
+            val = lowered[key]
+            if isinstance(val, bool) and val:
+                return True, str(lowered.get("reason", key))
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and val:
+                return True, str(lowered.get("reason", key))
+            if isinstance(val, str) and val.strip().lower() in truthy:
+                return True, str(lowered.get("reason", key))
+
+        # 2) reason/type-style string values containing a transfer keyword.
+        for rk in self.connector.transfer_reason_metadata_keys:
+            rv = lowered.get(rk)
+            if isinstance(rv, str):
+                low = rv.lower()
+                if any(sub in low for sub in self.connector.transfer_reason_keywords):
+                    return True, rv
+
+        return False, ""
+
+    def _emit_session_end(self, conversation_id: str, end_obj: Any) -> None:
+        metadata = self._metadata_to_dict(end_obj)
+
+        # Log the raw metadata so operators can see exactly what the agent sends
+        # on escalation and map transfer_metadata_keys accordingly.
+        self.logger.info(
+            f"[{conversation_id}] [GECX] EndSession metadata: {metadata or '{}'}"
+        )
+
+        is_transfer, reason = self._detect_transfer(metadata)
+        if is_transfer:
+            self.logger.info(
+                f"[{conversation_id}] [GECX] Escalation detected -> "
+                f"TRANSFER_TO_AGENT (reason: {reason or 'agent_requested_transfer'})"
+            )
             self.outbound_queue.put(
                 self.connector.create_transfer_response(
                     conversation_id=conversation_id,
                     text="Transferring you to an agent.",
-                    reason=metadata.get("reason", "agent_requested_transfer"),
+                    reason=reason or "agent_requested_transfer",
                 )
             )
             return
@@ -466,6 +521,47 @@ class GECXConnector(IVendorConnector):
         self.enable_partial_responses = config.get("enable_partial_responses", True)
         self.force_input_format = config.get("force_input_format", "").lower()
         self.agents = config.get("agents", ["GECX Agent"])
+
+        # --- Escalation / human handoff detection ---------------------------
+        # CES signals escalation as an EndSession carrying a metadata Struct.
+        # The exact keys depend on how the CX Agent Studio agent is configured,
+        # so detection is intentionally configurable.
+        #
+        # 1) If any of these metadata keys is truthy, treat the end as a
+        #    transfer-to-human. Values are matched loosely (true/"true"/1/"yes").
+        self.transfer_metadata_keys = [
+            str(k).lower()
+            for k in config.get(
+                "transfer_metadata_keys",
+                [
+                    "transfer",
+                    "transfer_to_agent",
+                    "transfer_to_human",
+                    "escalate",
+                    "escalation",
+                    "handoff",
+                    "human_handoff",
+                    "live_agent_handoff",
+                ],
+            )
+        ]
+        # 2) If a reason/type-style metadata value contains any of these
+        #    substrings, also treat the end as a transfer.
+        self.transfer_reason_keywords = [
+            str(s).lower()
+            for s in config.get(
+                "transfer_reason_keywords",
+                ["transfer", "escalat", "human", "live agent", "live_agent", "handoff"],
+            )
+        ]
+        # Metadata keys whose (string) values are inspected for the keywords above.
+        self.transfer_reason_metadata_keys = [
+            str(k).lower()
+            for k in config.get(
+                "transfer_reason_metadata_keys",
+                ["reason", "end_reason", "type", "status", "intent", "action"],
+            )
+        ]
 
         self.detected_formats: Dict[str, Tuple[int, str]] = {}
         self.streaming_sessions: Dict[str, GECXStreamingSession] = {}
