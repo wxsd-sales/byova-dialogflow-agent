@@ -414,6 +414,22 @@ class GECXStreamingSession:
                 if any(sub in low for sub in self.connector.transfer_reason_keywords):
                     return True, rv
 
+        # 3) Any truthy metadata whose KEY NAME contains a transfer keyword
+        #    (e.g. "session_escalated", "escalated", "agent_handoff"). This
+        #    generically catches naming variants the agent may emit.
+        for key, val in lowered.items():
+            if not any(sub in key for sub in self.connector.transfer_reason_keywords):
+                continue
+            if isinstance(val, bool) and val:
+                return True, key
+            if isinstance(val, (int, float)) and not isinstance(val, bool) and val:
+                return True, key
+            if isinstance(val, str) and val.strip().lower() in truthy:
+                return True, key
+            if val is None:
+                # Bare presence of an escalation-style flag with no value.
+                return True, key
+
         return False, ""
 
     def _emit_session_end(self, conversation_id: str, end_obj: Any) -> None:
@@ -561,6 +577,8 @@ class GECXConnector(IVendorConnector):
                     "transfer_to_human",
                     "escalate",
                     "escalation",
+                    "escalated",
+                    "session_escalated",
                     "handoff",
                     "human_handoff",
                     "live_agent_handoff",

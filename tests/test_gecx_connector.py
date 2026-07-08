@@ -197,6 +197,16 @@ class TestServerMessageMapping:
         responses = self._end_session(connector, {"escalate": "true"})
         assert responses[0]["message_type"] == "transfer"
 
+    def test_end_session_with_session_escalated_flag_emits_transfer(self, connector):
+        # This is the exact payload GECX emits on escalation.
+        responses = self._end_session(connector, {"session_escalated": True})
+        assert responses[0]["message_type"] == "transfer"
+
+    def test_end_session_with_escalation_key_name_emits_transfer(self, connector):
+        # Key-name keyword match catches naming variants generically.
+        responses = self._end_session(connector, {"agent_escalated_call": True})
+        assert responses[0]["message_type"] == "transfer"
+
     def test_end_session_normal_completion_is_not_transfer(self, connector):
         responses = self._end_session(connector, {"reason": "user said goodbye"})
         assert responses[0]["message_type"] == "session_end"
